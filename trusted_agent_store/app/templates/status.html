@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Submission Status - Trusted Agent Store</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+    <nav class="bg-gray-800 text-white p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="{{ url_prefix }}/" class="text-xl font-bold">Trusted Agent Store</a>
+            <a href="{{ url_prefix }}/submit" class="hover:text-gray-300">Submit Agent</a>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-4 py-8">
+        <div id="main-content" class="bg-white shadow-lg rounded-lg overflow-hidden mb-8">
+            {% include 'partials/submission_content.html' %}
+        </div>
+    </div>
+
+    <script>
+        function filterScenarios() {
+            const filter = document.getElementById('verdictFilter').value;
+            const rows = document.querySelectorAll('.scenario-row');
+
+            rows.forEach(row => {
+                const verdict = row.getAttribute('data-verdict');
+                if (filter === 'all' || verdict === filter) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        function filterSecurityScenarios() {
+            const filter = document.getElementById('securityVerdictFilter').value;
+            const rows = document.querySelectorAll('.security-scenario-row');
+
+            rows.forEach(row => {
+                const verdict = row.getAttribute('data-verdict');
+                if (filter === 'all' || verdict === filter) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        // Auto-fetch submission data every 5 seconds to check for updates
+        let pollingInterval = null;
+        let lastUpdateTime = "{{ submission.updated_at }}";
+        let isUpdating = false;
+
+        async function checkForUpdates() {
+            // AJAX polling is DISABLED - all updates come via WebSocket
+            console.log('[Polling] checkForUpdates called but disabled - using WebSocket-only architecture');
+            return;
+        }
+
+        async function updatePageContent() {
+            try {
+                // Fetch the full HTML of the current page
+                const response = await fetch(window.location.href);
+                if (!response.ok) return;
+                const htmlText = await response.text();
+
+                // Parse the new HTML
+                const parser = new DOMParser();
+                const newDoc = parser.parseFromString(htmlText, 'text/html');
+                const newContent = newDoc.getElementById('main-content');
+                const currentContent = document.getElementById('main-content');
+
+                if (newContent && currentContent) {
+                    // Capture state
+                    const scrollPos = window.scrollY;
+                    const openDetails = Array.from(document.querySelectorAll('details[open]'))
+                        .map(el => el.id)
+                        .filter(id => id); // Only keep elements with IDs
+
+                    // Replace content
+                    currentContent.innerHTML = newContent.innerHTML;
+
+                    // Restore state
+                    openDetails.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.open = true;
+                    });
+
+                    // Restore scroll position
+                    window.scrollTo(0, scrollPos);
+
+                    console.log('Page content updated via Ajax, state preserved.');
+                }
+            } catch (error) {
+                console.error('Error updating page content:', error);
+            }
+        }
+
+        function startPolling() {
+            // AJAX polling is DISABLED - all updates come via WebSocket
+            console.log('[Polling] AJAX polling is disabled - using WebSocket-only architecture');
+            return;
+        }
+
+        // WebSocket-only architecture - no AJAX polling
+        console.log('[Init] WebSocket-only architecture enabled - AJAX polling disabled');
+    </script>
+    <div class="text-center text-gray-400 text-xs py-4">
+        Status UI Version: 2025-11-23-v1 (Fix running state)
+    </div>
+</body>
+</html>

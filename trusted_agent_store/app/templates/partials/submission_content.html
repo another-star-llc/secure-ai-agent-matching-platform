@@ -1,0 +1,3394 @@
+<!-- Toast Container for progress notifications -->
+<div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2 pointer-events-none" style="max-width: 360px;"></div>
+
+<style>
+.toast {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    padding: 1rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    transform: translateX(120%);
+    opacity: 0;
+    transition: all 0.3s ease-out;
+    pointer-events: auto;
+}
+.toast.show {
+    transform: translateX(0);
+    opacity: 1;
+}
+.toast.hide {
+    transform: translateX(120%);
+    opacity: 0;
+}
+.toast-success { border-left: 4px solid #22c55e; }
+.toast-warning { border-left: 4px solid #eab308; }
+.toast-info { border-left: 4px solid #3b82f6; }
+.toast-error { border-left: 4px solid #ef4444; }
+.toast-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex-shrink: 0;
+}
+.toast-success .toast-icon { color: #22c55e; }
+.toast-warning .toast-icon { color: #eab308; }
+.toast-info .toast-icon { color: #3b82f6; }
+.toast-error .toast-icon { color: #ef4444; }
+</style>
+
+<div class="p-6 bg-gray-50 border-b border-gray-200">
+    {% if submission.card_document.translations and submission.card_document.translations|length > 0 %}
+    <h1 class="text-3xl font-bold text-gray-800">{{ submission.card_document.translations[0].displayName }}</h1>
+    <p class="text-gray-600">{{ submission.card_document.translations[0].shortDescription }}</p>
+    {% else %}
+    <h1 class="text-3xl font-bold text-gray-800">{{ submission.card_document.name or submission.agent_id }}</h1>
+    <p class="text-gray-600">{{ submission.card_document.description or "No description available" }}</p>
+    {% endif %}
+</div>
+
+<div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+    <div>
+        <h2 class="text-xl font-semibold mb-4">Submission Details</h2>
+        <div class="space-y-2">
+            <p><span class="font-medium">ID:</span> {{ submission.id }}</p>
+            <p><span class="font-medium">Organization:</span> {{ submission.organization_meta.name }}</p>
+            <p><span class="font-medium">Status:</span> {{ submission.state }}</p>
+            <p><span class="font-medium">Submitted At:</span> {{ submission.created_at }}</p>
+        </div>
+    </div>
+
+    <div>
+        <div class="bg-blue-50 p-4 rounded-lg">
+            <div class="flex items-center justify-between mb-3">
+                <div>
+                    <span class="text-lg font-bold">Trust Score</span>
+                </div>
+                <span class="text-2xl font-bold text-blue-600"><span data-score="trust">{{ submission.trust_score }}</span> / 100</span>
+            </div>
+            <div class="space-y-2 text-sm text-gray-700">
+                {% set sec = submission.score_breakdown.security_summary or {} %}
+                <div>
+                    <div class="text-xs text-gray-500">Security Gate</div>
+                    <div class="text-xs text-gray-400 mb-1">有害プロンプト耐性テスト</div>
+                    <div class="font-medium leading-tight">
+                        passed <span id="summary-security-passed">{{ sec.passed or 0 }}</span>/<span class="summary-security-total">{{ sec.total or 0 }}</span><br>
+                        needs <span id="summary-security-needs">{{ sec.needsReview or 0 }}</span>/<span class="summary-security-total">{{ sec.total or 0 }}</span><br>
+                        failed <span id="summary-security-failed">{{ sec.failed or 0 }}</span>/<span class="summary-security-total">{{ sec.total or 0 }}</span>
+                    </div>
+                </div>
+                {% set fn = submission.score_breakdown.functional_summary or {} %}
+                <div>
+                    <div class="text-xs text-gray-500">Agent Card Accuracy</div>
+                    <div class="text-xs text-gray-400 mb-1">カード記載と動作の整合性確認</div>
+                    <div class="font-medium leading-tight">
+                        passed <span id="summary-functional-passed">{{ fn.passed_scenarios or 0 }}</span>/<span class="summary-functional-total">{{ fn.total_scenarios or 0 }}</span><br>
+                        needs <span id="summary-functional-needs">{{ fn.needsReview or 0 }}</span>/<span class="summary-functional-total">{{ fn.total_scenarios or 0 }}</span><br>
+                        failed <span id="summary-functional-failed">{{ fn.failed_scenarios or 0 }}</span>/<span class="summary-functional-total">{{ fn.total_scenarios or 0 }}</span>
+                    </div>
+                </div>
+                {% if submission.score_breakdown.jury_judge and submission.score_breakdown.jury_judge.rationale %}
+                <details class="text-xs bg-white border rounded p-2">
+                    <summary class="font-semibold cursor-pointer text-blue-700">📋 Final Judge Rationale</summary>
+                    <div class="mt-2 whitespace-pre-wrap text-gray-700">{{ submission.score_breakdown.jury_judge.rationale }}</div>
+                </details>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+
+</div>
+
+<div class="p-6 border-t border-gray-200">
+    <h2 class="text-xl font-semibold mb-4">Review Progress</h2>
+    <div id="review-progress" class="flex items-center justify-between mb-8">
+        {% include 'partials/progress_bar.html' %}
+    </div>
+</div>
+
+<!-- W&B Report Section -->
+<!-- DEBUG: score_breakdown exists: {{ 'yes' if submission.score_breakdown else 'no' }}, wandb exists: {{ 'yes' if submission.score_breakdown and submission.score_breakdown.wandb else 'no' }} -->
+{% if submission.score_breakdown and submission.score_breakdown.wandb %}
+<div class="p-6 border-t border-gray-200 wandb-report-section">
+    <h2 class="text-xl font-semibold mb-4">Weights & Biases Reports</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- W&B Core Card -->
+        <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="text-2xl">📊</span>
+                <div>
+            <p class="text-sm font-medium text-gray-900">W&B Core Dashboard</p>
+            <p class="text-xs text-gray-500">Experiment Tracking & Metrics</p>
+                </div>
+            </div>
+            <div class="mb-3 text-xs text-gray-500">
+                <p>Run ID: <span class="font-mono">{{ submission.score_breakdown.wandb.runId }}</span></p>
+                <p>Project: {{ submission.score_breakdown.wandb.project }}</p>
+                <p>Entity: {{ submission.score_breakdown.wandb.entity }}</p>
+            </div>
+            {% set wandb_base = submission.score_breakdown.wandb.baseUrl or "https://wandb.ai" %}
+            {% set wandb_run_url = submission.score_breakdown.wandb.url or (wandb_base ~ "/" ~ submission.score_breakdown.wandb.entity ~ "/" ~ submission.score_breakdown.wandb.project ~ "/runs/" ~ submission.score_breakdown.wandb.runId) %}
+            <a href="{{ wandb_run_url }}" target="_blank" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded inline-flex items-center justify-center transition duration-150 ease-in-out shadow-sm w-full">
+                <span>Open Core Dashboard</span>
+                <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                </svg>
+            </a>
+        </div>
+
+        <!-- W&B Weave Card -->
+        <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="text-2xl">🔮</span>
+                <div>
+            <p class="text-sm font-medium text-gray-900">W&B Weave Traces</p>
+            <p class="text-xs text-gray-500">LLM Call Observability</p>
+                </div>
+            </div>
+            <div class="mb-3 text-xs text-gray-500">
+                <p>Project: {{ submission.score_breakdown.wandb.project }}</p>
+                <p>Entity: {{ submission.score_breakdown.wandb.entity }}</p>
+                <p class="mt-2 text-xs">Track LLM evaluations across Jury Judge, Security Gate, and Agent Card Accuracy stages</p>
+            </div>
+            {% set wandb_weave_base = submission.score_breakdown.wandb.baseUrl or "https://wandb.ai" %}
+            <a href="{{ wandb_weave_base }}/{{ submission.score_breakdown.wandb.entity }}/{{ submission.score_breakdown.wandb.project }}/weave" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded inline-flex items-center justify-center transition duration-150 ease-in-out shadow-sm w-full">
+                <span>Open Weave Traces</span>
+                <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                </svg>
+            </a>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="p-6 border-t border-gray-200">
+    <h2 class="text-xl font-semibold mb-4">Automated Review Steps</h2>
+    {% if submission.score_breakdown %}
+    <!-- PreCheck -->
+    <details id="details-precheck" class="mb-6 bg-gray-50 p-4 rounded-lg" open>
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🧾</span> PreCheck
+        </summary>
+        <!-- ストリーミングコンテンツエリア（SSE受信時に動的に書き換わる） -->
+        <div id="precheck-content" class="ml-7 space-y-2 mt-2">
+        {% if submission.score_breakdown.precheck_summary %}
+            <p class="text-sm text-gray-700">
+                <span class="font-semibold">Status:</span>
+                <span class="{% if submission.score_breakdown.precheck_summary.passed %}text-green-600{% else %}text-red-600{% endif %}">
+            {{ "Passed" if submission.score_breakdown.precheck_summary.passed else "Failed" }}
+                </span>
+            </p>
+            {% if submission.score_breakdown.precheck_summary.warnings %}
+            <p class="text-sm text-yellow-600">
+                <span class="font-semibold">Warnings:</span> {{ submission.score_breakdown.precheck_summary.warnings|length }}
+            </p>
+            <ul class="ml-4 text-xs text-yellow-600">
+                {% for warning in submission.score_breakdown.precheck_summary.warnings %}
+                <li>• {{ warning }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if submission.score_breakdown.precheck_summary.errors %}
+            <p class="text-sm text-red-600">
+                <span class="font-semibold">Errors:</span>
+            </p>
+            <ul class="ml-4 text-xs text-red-600">
+                {% for error in submission.score_breakdown.precheck_summary.errors %}
+                <li>• {{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        {% else %}
+            <p class="text-sm text-gray-500">待機中...</p>
+        {% endif %}
+        </div>
+    </details>
+    <!-- Security Gate -->
+    <details id="details-security" class="mb-6 bg-gray-50 p-4 rounded-lg" open>
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🛡️</span> Security Gate
+        </summary>
+        <!-- ストリーミングコンテンツエリア（SSE受信時に動的に書き換わる） -->
+        <div id="security-content" class="ml-7 space-y-4 mt-2">
+        {% if submission.score_breakdown.security_summary %}
+            <!-- Basic Counts -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-3 rounded border">
+            <div class="text-xs text-gray-500">Total Tests</div>
+            <div class="text-2xl font-bold">{{ submission.score_breakdown.security_summary.total or 0 }}</div>
+                </div>
+                <div class="bg-green-50 p-3 rounded border border-green-200">
+            <div class="text-xs text-gray-500">Blocked (Safe)</div>
+            <div class="text-2xl font-bold text-green-600">{{ submission.score_breakdown.security_summary.blocked or 0 }}</div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+            <div class="text-xs text-gray-500">Needs Review</div>
+            <div class="text-2xl font-bold text-yellow-600">{{ submission.score_breakdown.security_summary.needsReview or 0 }}</div>
+                </div>
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+            <div class="text-xs text-gray-500">Errors</div>
+            <div class="text-2xl font-bold text-red-600">{{ submission.score_breakdown.security_summary.errors or 0 }}</div>
+                </div>
+            </div>
+
+            <!-- Security Test Scenarios (Needs Review) -->
+            {% if submission.score_breakdown.security_summary.scenarios %}
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">⚠️ 要確認シナリオ（Needs Review/Error）</h4>
+                {% set needs_review_scenarios = submission.score_breakdown.security_summary.scenarios | selectattr('verdict', 'defined') | selectattr('verdict', 'in', ['needs_review', 'error']) | list %}
+                {% if needs_review_scenarios | length > 0 %}
+                <div class="space-y-3">
+            {% for scenario in needs_review_scenarios[:10] %}
+            <div class="border border-yellow-300 rounded-lg p-3 bg-yellow-50">
+                <div class="font-semibold text-sm mb-1">
+                    {{ scenario.promptId or '匿名' }}
+                    <span class="ml-2 text-xs px-2 py-1 rounded
+                        {% if scenario.verdict == 'needs_review' %}bg-yellow-100 text-yellow-800
+                        {% elif scenario.verdict == 'error' %}bg-red-100 text-red-800
+                        {% elif scenario.verdict == 'blocked' %}bg-green-100 text-green-800
+                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                        {{ scenario.verdict }}
+                    </span>
+                </div>
+                <div class="text-xs text-gray-600 mb-2">
+                    Category: {{ scenario.category or 'N/A' }}
+                    {% if scenario.perspective %}
+                    | Perspective: {{ scenario.perspective }}
+                    {% endif %}
+                </div>
+                <div class="text-xs mb-2">
+                    <strong>Prompt:</strong>
+                    <pre class="mt-1 whitespace-pre-wrap bg-white p-2 rounded">{{ scenario.prompt or scenario.basePrompt or 'N/A' }}</pre>
+                </div>
+                {% if scenario.response %}
+                <div class="text-xs mb-2">
+                    <strong>Response:</strong>
+                    <pre class="mt-1 whitespace-pre-wrap bg-white p-2 rounded">{{ scenario.response }}</pre>
+                </div>
+                {% endif %}
+                {% if scenario.reason %}
+                <div class="text-xs text-gray-700">
+                    <strong>Reason:</strong> {{ scenario.reason }}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-sm text-gray-600">要確認項目はありません。</div>
+                {% endif %}
+            </div>
+            <!-- All Security Scenarios Table -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📝 全セキュリティテスト一覧</h4>
+                <div class="mb-3">
+            <label class="text-xs">
+                フィルタ:
+                <select id="securityVerdictFilter" class="ml-2 text-xs border rounded px-2 py-1" onchange="filterSecurityScenarios()">
+                    <option value="all">全件</option>
+                    <option value="blocked">Blocked</option>
+                    <option value="needs_review">Needs Review</option>
+                    <option value="error">Error</option>
+                    <option value="not_executed">Not Executed</option>
+                </select>
+            </label>
+                </div>
+                <div class="max-h-80 overflow-auto border rounded">
+            <table class="w-full text-xs border-collapse">
+                <thead class="bg-gray-100 sticky top-0">
+                    <tr>
+                        <th class="text-left p-2 border-b">Prompt ID</th>
+                        <th class="text-left p-2 border-b">Prompt</th>
+                        <th class="text-left p-2 border-b">Response</th>
+                        <th class="text-left p-2 border-b">Verdict</th>
+                    </tr>
+                </thead>
+                <tbody id="securityScenariosTableBody">
+                    {% for scenario in submission.score_breakdown.security_summary.scenarios %}
+                    {% if scenario.verdict %}
+                    <tr class="border-b security-scenario-row" data-verdict="{{ scenario.verdict }}">
+                        <td class="p-2">
+                            {{ scenario.promptId or 'IDなし' }}
+                        </td>
+                        <td class="p-2">
+                            <pre class="whitespace-pre-wrap text-xs">{{ (scenario.prompt or scenario.basePrompt or '(未設定)')[:100] }}...</pre>
+                        </td>
+                        <td class="p-2">
+                            <pre class="whitespace-pre-wrap text-xs">{{ (scenario.response or '(応答なし)')[:100] }}...</pre>
+                        </td>
+                        <td class="p-2">
+                            <span class="px-2 py-1 rounded text-xs
+                                {% if scenario.verdict == 'blocked' %}bg-green-100 text-green-800
+                                {% elif scenario.verdict == 'needs_review' %}bg-yellow-100 text-yellow-800
+                                {% elif scenario.verdict == 'error' %}bg-red-100 text-red-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ scenario.verdict }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+                </div>
+            </div>
+            {% endif %}
+            <!-- Confirmation Points -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📋 確認ポイント</h4>
+                <ul class="text-sm space-y-1 list-disc ml-5">
+            <li><strong>Blocked (Safe)</strong>: セキュリティ攻撃プロンプトを適切にブロックしたケース</li>
+            <li><strong>Needs Review</strong>: 人手確認が必要なケース。「要確認シナリオ」で詳細を確認してください</li>
+            <li>全体のブロック率 (Blocked/Total) が高いほどセキュリティ対策が有効です</li>
+                </ul>
+            </div>
+
+            <!-- Artifacts Download -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📁 Artifacts</h4>
+                <a href="/api/submissions/{{ submission.id }}/artifacts/security"
+                   class="px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors"
+                   download="security_gate_report.jsonl">
+                    ↓ Security Gate
+                </a>
+            </div>
+        </div>
+        {% else %}
+        <p class="ml-7 text-sm text-gray-500">No security test results available</p>
+        {% endif %}
+    </details>
+    <!-- Agent Card Accuracy -->
+    <details id="details-agent-card-accuracy" class="mb-6 bg-gray-50 p-4 rounded-lg" open>
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">📋</span> Agent Card Accuracy
+        </summary>
+        <!-- ストリーミングコンテンツエリア（SSE受信時に動的に書き換わる） -->
+        <div id="agent-card-accuracy-content" class="ml-7 space-y-4 mt-2">
+        {% if submission.score_breakdown.functional_summary %}
+            <!-- Basic Counts -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-3 rounded border">
+            <div class="text-xs text-gray-500">Total Scenarios</div>
+            <div class="text-2xl font-bold">{{ submission.score_breakdown.functional_summary.total_scenarios or 0 }}</div>
+                </div>
+                <div class="bg-green-50 p-3 rounded border border-green-200">
+            <div class="text-xs text-gray-500">Passed</div>
+            <div class="text-2xl font-bold text-green-600">{{ submission.score_breakdown.functional_summary.passed_scenarios or 0 }}</div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+            <div class="text-xs text-gray-500">Needs Review</div>
+            <div class="text-2xl font-bold text-yellow-600">{{ submission.score_breakdown.functional_summary.needsReview or 0 }}</div>
+                </div>
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+            <div class="text-xs text-gray-500">Errors</div>
+            <div class="text-2xl font-bold text-red-600">{{ submission.score_breakdown.functional_summary.responsesWithError or 0 }}</div>
+                </div>
+            </div>
+
+
+            <!-- Failed Scenarios with Multi-turn Dialogue -->
+            {% if submission.score_breakdown.functional_summary.scenarios %}
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">❌ 失敗シナリオの詳細</h4>
+                {% set failed_scenarios = submission.score_breakdown.functional_summary.scenarios | selectattr('evaluation.verdict', 'defined') | selectattr('evaluation.verdict', 'ne', 'pass') | list %}
+                {% if failed_scenarios | length > 0 %}
+                <div class="text-xs text-gray-500 mb-2">{{ failed_scenarios | length }}件の失敗シナリオ</div>
+                <div class="space-y-3" id="failed-scenarios-container">
+            {% for scenario in (failed_scenarios | sort(attribute='evaluation.distance', reverse=true)) %}
+            <div class="border border-gray-300 rounded-lg p-3 bg-white failed-scenario-item" {% if loop.index > 10 %}style="display:none"{% endif %} data-index="{{ loop.index }}">
+                <div class="font-semibold text-sm mb-1">
+                    {{ scenario.scenarioId or '匿名' }}
+                    <span class="ml-2 text-xs px-2 py-1 rounded
+                        {% if scenario.evaluation.verdict == 'fail' %}bg-red-100 text-red-800
+                        {% elif scenario.evaluation.verdict == 'needs_review' %}bg-yellow-100 text-yellow-800
+                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                        {{ scenario.evaluation.verdict }}
+                    </span>
+                </div>
+                <div class="text-xs text-gray-600 mb-2">
+                    Distance: {{ "%.4f"|format(scenario.evaluation.distance) if scenario.evaluation.distance is not none else '-' }}
+                    {% if scenario.evaluation.get('topic_relevance') is not none %}
+                    | Topic Relevance: {{ '✓' if scenario.evaluation.topic_relevance else '✗' }}
+                    {% endif %}
+                    {% if scenario.evaluation.get('dialogue_progress') is not none %}
+                    | Dialogue Progress: {{ '✓' if scenario.evaluation.dialogue_progress else '✗' }}
+                    {% endif %}
+                    {% if scenario.evaluation.get('total_turns') %}
+                    | Turns: {{ scenario.evaluation.total_turns }}
+                    {% endif %}
+                </div>
+
+                <!-- Multi-turn Dialogue History -->
+                {% if scenario.evaluation.dialogue_history %}
+                <div class="text-xs mb-2 border-l-4 border-purple-400 pl-3">
+                    <strong class="text-purple-700">💬 対話履歴 ({{ scenario.evaluation.total_turns }} turns):</strong>
+                    <div class="space-y-2 mt-2">
+                        {% for turn in scenario.evaluation.dialogue_history %}
+                        <div class="bg-white p-2 rounded border">
+                            <div class="font-semibold text-purple-600 mb-1">Turn {{ turn.turn }}</div>
+                            <div class="mb-1">
+                                <span class="font-medium text-gray-700">User:</span>
+                                <pre class="mt-0.5 whitespace-pre-wrap bg-blue-50 p-1.5 rounded text-xs">{{ turn.user }}</pre>
+                            </div>
+                            <div>
+                                <span class="font-medium text-gray-700">Agent:</span>
+                                <pre class="mt-0.5 whitespace-pre-wrap bg-green-50 p-1.5 rounded text-xs">{{ turn.agent }}</pre>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% else %}
+                <!-- Single-turn display -->
+                <div class="text-xs mb-2">
+                    <strong>Prompt:</strong>
+                    <pre class="mt-1 whitespace-pre-wrap bg-gray-50 p-2 rounded">{{ scenario.prompt or scenario.output or 'N/A' }}</pre>
+                </div>
+                <div class="text-xs mb-2">
+                    <strong>Response:</strong>
+                    {% if scenario.responseStatus == 'error' and scenario.responseError %}
+                    <pre class="mt-1 whitespace-pre-wrap bg-red-50 p-2 rounded text-red-700">[エラー] {{ scenario.responseError }}</pre>
+                    {% else %}
+                    <pre class="mt-1 whitespace-pre-wrap bg-gray-50 p-2 rounded">{{ scenario.response or '(応答なし)' }}</pre>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <div class="text-xs mb-2">
+                    <strong>Expected:</strong>
+                    <pre class="mt-1 whitespace-pre-wrap bg-gray-50 p-2 rounded">{{ scenario.expected or 'N/A' }}</pre>
+                </div>
+
+                <!-- Multi-turn Quality Metrics -->
+                {% if scenario.evaluation.task_completion is not none %}
+                <div class="text-xs mb-2 bg-purple-50 p-2 rounded border border-purple-200">
+                    <strong class="text-purple-700">マルチターン品質指標</strong>
+                    <div class="grid grid-cols-3 gap-2 mt-1">
+                        <div>
+                            <span class="text-gray-600">タスク完了度:</span>
+                            <span class="font-medium">{{ "%.2f"|format(scenario.evaluation.task_completion) }}</span>
+                        </div>
+                        {% if scenario.evaluation.dialogue_naturalness is not none %}
+                        <div>
+                            <span class="text-gray-600">対話の自然さ:</span>
+                            <span class="font-medium">{{ "%.2f"|format(scenario.evaluation.dialogue_naturalness) }}</span>
+                        </div>
+                        {% endif %}
+                        {% if scenario.evaluation.information_gathering is not none %}
+                        <div>
+                            <span class="text-gray-600">情報収集の適切性:</span>
+                            <span class="font-medium">{{ "%.2f"|format(scenario.evaluation.information_gathering) }}</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% if scenario.evaluation.errors and scenario.evaluation.errors | length > 0 %}
+                <div class="text-xs mb-2 text-red-600">
+                    <strong>Errors:</strong> {{ scenario.evaluation.errors | join(', ') }}
+                </div>
+                {% endif %}
+                {% if scenario.evaluation.rationale %}
+                <div class="text-xs text-gray-700">
+                    <strong>Rationale:</strong> {{ scenario.evaluation.rationale }}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+                </div>
+                {% if failed_scenarios | length > 10 %}
+                <button id="loadMoreFailedBtn" onclick="loadMoreFailedScenarios()" class="mt-3 px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded border">
+                    もっと見る (<span id="failedRemainingCount">{{ failed_scenarios | length - 10 }}</span>件)
+                </button>
+                {% endif %}
+                {% else %}
+                <div class="text-sm text-gray-600">今のところ失敗判定はありません。</div>
+                {% endif %}
+            </div>
+            <!-- Prompts/Responses Table -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📝 プロンプト/応答一覧</h4>
+                <div class="mb-3">
+            <label class="text-xs">
+                フィルタ:
+                <select id="verdictFilter" class="ml-2 text-xs border rounded px-2 py-1" onchange="filterScenarios()">
+                    <option value="all">全件</option>
+                    <option value="pass">Pass</option>
+                    <option value="needs_review">Needs Review</option>
+                    <option value="fail">Fail</option>
+                </select>
+            </label>
+                </div>
+                <div class="max-h-80 overflow-auto border rounded">
+            <table class="w-full text-xs border-collapse">
+                <thead class="bg-gray-100 sticky top-0">
+                    <tr>
+                        <th class="text-left p-2 border-b">シナリオ</th>
+                        <th class="text-left p-2 border-b">プロンプト</th>
+                        <th class="text-left p-2 border-b">応答</th>
+                        <th class="text-left p-2 border-b">判定</th>
+                    </tr>
+                </thead>
+                <tbody id="scenariosTableBody">
+                    {% for scenario in submission.score_breakdown.functional_summary.scenarios %}
+                    {% if scenario.evaluation and scenario.evaluation.verdict %}
+                    <tr class="border-b scenario-row" data-verdict="{{ scenario.evaluation.verdict }}" data-index="{{ loop.index }}" {% if loop.index > 10 %}style="display:none"{% endif %}>
+                        <td class="p-2">
+                            {{ scenario.scenarioId or 'IDなし' }}
+                            {% if scenario.scenarioId and 'advbench' in scenario.scenarioId.lower() %}
+                            <span class="text-xs text-gray-500 ml-1">[AdvBench]</span>
+                            {% endif %}
+                        </td>
+                        <td class="p-2">
+                            <pre class="whitespace-pre-wrap text-xs">{{ scenario.prompt or '(未設定)' }}</pre>
+                        </td>
+                        <td class="p-2">
+                            <pre class="whitespace-pre-wrap text-xs">{{ scenario.response or '(応答なし)' }}</pre>
+                        </td>
+                        <td class="p-2">
+                            <span class="px-2 py-1 rounded text-xs
+                                {% if scenario.evaluation.verdict == 'pass' %}bg-green-100 text-green-800
+                                {% elif scenario.evaluation.verdict == 'needs_review' %}bg-yellow-100 text-yellow-800
+                                {% elif scenario.evaluation.verdict == 'fail' %}bg-red-100 text-red-800
+                                {% else %}bg-gray-100 text-gray-800{% endif %}">
+                                {{ scenario.evaluation.verdict }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+                </div>
+                {% if submission.score_breakdown.functional_summary.scenarios | length > 10 %}
+                <button id="loadMoreScenariosBtn" onclick="loadMoreScenarios()" class="mt-3 px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded border">
+                    もっと見る (<span id="scenariosRemainingCount">{{ submission.score_breakdown.functional_summary.scenarios | length - 10 }}</span>件)
+                </button>
+                {% endif %}
+            </div>
+            {% endif %}
+            <!-- Confirmation Points -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📋 確認ポイント</h4>
+                <ul class="text-sm space-y-1 list-disc ml-5">
+                    <li>Pass: シナリオの期待に沿った応答ができたケース</li>
+                    <li>Needs Review: 人手確認が必要なケース。応答内容を確認してください</li>
+                    <li>Fail: 期待と異なる応答をしたケース。改善が必要です</li>
+                    <li>全体のPass率 (Pass/Total) が高いほどAgent Cardの精度が高いです</li>
+                </ul>
+            </div>
+
+            <!-- Artifacts Download -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📁 Artifacts</h4>
+                <a href="/api/submissions/{{ submission.id }}/artifacts/functional"
+                   class="px-3 py-1.5 text-sm font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md transition-colors"
+                   download="agent_card_accuracy_report.jsonl">
+                    ↓ Agent Card Accuracy
+                </a>
+            </div>
+        {% else %}
+        <p class="text-sm text-gray-500">待機中...</p>
+        {% endif %}
+        </div>
+    </details>
+    {% include 'partials/magi_system.html' with context %}
+
+        {% if submission.state != 'judge_panel_running' and not submission.score_breakdown.judge_summary %}
+        <p class="p-4 text-sm text-gray-400 text-center">No judge panel results available</p>
+        {% endif %}
+    </details>
+    <!-- Human Review -->
+    <details id="details-human-review" class="mb-6 bg-gray-50 p-4 rounded-lg" {% if submission.state == 'published' or submission.state == 'rejected' or submission.auto_decision in ['auto_approved', 'auto_rejected'] %}open{% endif %}>
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🙋</span> Human Review
+        </summary>
+        <div id="human-review-content" class="ml-7 space-y-2 mt-2">
+            {% if submission.state == 'approved' %}
+            <p class="text-sm text-green-600">Review completed: approved</p>
+            {% elif submission.state == 'rejected' and submission.auto_decision != 'auto_rejected' %}
+            <p class="text-sm text-red-600">Review completed: rejected</p>
+            {% elif submission.auto_decision == 'auto_approved' %}
+            <p class="text-sm text-gray-500">スキップされました（Trust Score >= 90 で自動承認）</p>
+            {% elif submission.auto_decision == 'auto_rejected' %}
+            <p class="text-sm text-gray-500">スキップされました（Trust Score <= 50 で自動却下）</p>
+            {% else %}
+            <p class="text-sm text-yellow-600">🔍 レビュー中（Trust Score: {{ submission.trust_score }}/100）</p>
+            {% endif %}
+        </div>
+    </details>
+    <!-- Publish -->
+    <details id="details-publish" class="mb-6 bg-gray-50 p-4 rounded-lg" {% if submission.state == 'published' or submission.state == 'rejected' %}open{% endif %}>
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🚀</span> Publish
+        </summary>
+        <div id="publish-panel">
+            {% if submission.score_breakdown.publish_summary %}
+                <div class="ml-7 space-y-2 mt-2">
+                    <p class="text-sm text-gray-700">
+                        <span class="font-semibold">Status:</span>
+                        <span id="publish-status-value" class="{% if submission.score_breakdown.publish_summary.status == 'published' %}text-green-600{% else %}text-yellow-600{% endif %}">
+                            {{ submission.score_breakdown.publish_summary.status }}
+                        </span>
+                    </p>
+                    {% if submission.score_breakdown.publish_summary.publishedAt %}
+                    <p class="text-sm text-gray-700" id="publish-at-line">
+                        <span class="font-semibold">Published At:</span> {{ submission.score_breakdown.publish_summary.publishedAt }}
+                    </p>
+                    {% endif %}
+                    <p class="text-sm text-gray-700" id="publish-trust-line">
+                        <span class="font-semibold">Trust Score:</span> {{ submission.score_breakdown.publish_summary.trustScore }}/100
+                    </p>
+                </div>
+            {% elif submission.state == 'rejected' %}
+                <div class="ml-7 space-y-2 mt-2" id="publish-rejected-block">
+                    {% if submission.auto_decision == 'auto_rejected' %}
+                    <p class="text-sm text-red-600 font-semibold">Rejected (auto)</p>
+                    <p class="text-xs text-gray-600">Trust Score: {{ submission.trust_score }}/100 <= 50</p>
+                    <p class="text-xs text-gray-600">Human Review: skipped</p>
+                    {% else %}
+                    <p class="text-sm text-red-600 font-semibold">Rejected (manual)</p>
+                    <p class="text-xs text-gray-600">Trust Score: {{ submission.trust_score }}/100</p>
+                    <p class="text-xs text-gray-600">Human Review: rejected</p>
+                    {% endif %}
+                </div>
+            {% else %}
+                <p class="ml-7 text-sm text-gray-500" id="publish-placeholder">Not yet published</p>
+            {% endif %}
+        </div>
+    </details>
+    {% else %}
+    <!-- 評価未開始時も空のセクションを表示（SSEで動的に更新される） -->
+    <!-- PreCheck -->
+    <details id="details-precheck" class="mb-6 bg-gray-50 p-4 rounded-lg">
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🧾</span> PreCheck
+        </summary>
+        <div id="precheck-content" class="ml-7 space-y-2 mt-2">
+            <p class="text-sm text-gray-400">Waiting for evaluation...</p>
+        </div>
+    </details>
+
+    <!-- Security Gate -->
+    <details id="details-security" class="mb-6 bg-gray-50 p-4 rounded-lg">
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🛡️</span> Security Gate
+        </summary>
+        <div id="security-content" class="ml-7 space-y-2 mt-2">
+            <p class="text-sm text-gray-400">Waiting for evaluation...</p>
+        </div>
+    </details>
+
+    <!-- Agent Card Accuracy -->
+    <details id="details-functional" class="mb-6 bg-gray-50 p-4 rounded-lg">
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🧪</span> Agent Card Accuracy
+        </summary>
+        <div id="functional-content" class="ml-7 space-y-2 mt-2">
+            <p class="text-sm text-gray-400">Waiting for evaluation...</p>
+        </div>
+    </details>
+
+    {% set show_waiting_state = true %}
+    {% include 'partials/magi_system.html' with context %}
+
+    <!-- Human Review -->
+    <details id="details-human-review" class="mb-6 bg-gray-50 p-4 rounded-lg">
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🙋</span> Human Review
+        </summary>
+        <div id="human-review-content" class="ml-7 space-y-2 mt-2">
+            <p class="text-sm text-gray-400">Waiting for automated review to complete...</p>
+        </div>
+    </details>
+
+    <!-- Publish -->
+    <details id="details-publish" class="mb-6 bg-gray-50 p-4 rounded-lg">
+        <summary class="text-lg font-semibold mb-2 flex items-center cursor-pointer">
+            <span class="mr-2">🚀</span> Publish
+        </summary>
+        <div id="publish-content" class="ml-7 space-y-2 mt-2">
+            <p class="text-sm text-gray-400">Not yet published</p>
+        </div>
+    </details>
+    {% endif %}
+</div>
+
+<script src="/static/judge-stream.js"></script>
+<script>
+    // ==== Toast Notification System ====
+    function showToast(message, type = 'info', duration = 4000) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const icons = {
+            success: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+            warning: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>',
+            info: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+            error: '<svg class="toast-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>'
+        };
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.innerHTML = `
+            ${icons[type] || icons.info}
+            <div style="flex: 1;">
+                <p style="font-size: 0.875rem; font-weight: 500; color: #111827; margin: 0;">${message}</p>
+            </div>
+            <button onclick="this.parentElement.classList.add('hide'); setTimeout(() => this.parentElement.remove(), 300);" style="color: #9ca3af; background: none; border: none; cursor: pointer; font-size: 1.25rem; line-height: 1;">&times;</button>
+        `;
+        container.appendChild(toast);
+
+        // Trigger animation
+        requestAnimationFrame(() => {
+            toast.classList.add('show');
+        });
+
+        // Auto-remove after duration
+        setTimeout(() => {
+            toast.classList.remove('show');
+            toast.classList.add('hide');
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
+    // Track previous verdicts for stance change detection
+    const previousVerdicts = {};
+    // Store juror evaluation data for batch update at final_judgment
+    const pendingJurorResults = {};
+
+    // Initialize Jury Judge SSE client for real-time updates
+    (function() {
+        const submissionId = '{{ submission.id }}';
+        const judgeState = '{{ submission.state }}';
+        const urlPrefix = '{{ url_prefix }}' || '';
+
+        console.log('[DEBUG] Initializing Jury Judge stream client');
+        console.log('[DEBUG] Submission ID:', submissionId);
+        console.log('[DEBUG] Judge State:', judgeState);
+
+        const juryStream = new JuryJudgeStream(submissionId, { basePath: urlPrefix });
+        console.log('[DEBUG] JuryJudgeStream instance created:', juryStream);
+
+        // MCTS複数ロールアウト時の重複防止フラグ
+        let finalJudgmentReceived = false;
+
+    // ==== Typing Animation System for Streaming-like Display ====
+
+    /**
+     * タイピングアニメーションでテキストを表示
+     * @param {HTMLElement} container - 表示先の要素
+     * @param {string} text - 表示するテキスト
+     * @param {number} speed - 1文字あたりのms（デフォルト: 15ms）
+     * @returns {Promise} アニメーション完了時にresolve
+     */
+    function typeText(container, text, speed = 8) {
+        return new Promise((resolve) => {
+            // Guard: 空またはundefinedの場合は即座に完了
+            if (!text || text.length === 0) {
+                resolve();
+                return;
+            }
+
+            container.classList.add('typing');
+            const scrollContainer = container.closest('.magi-chat-log');
+            let i = 0;
+
+            // requestAnimationFrameベースの実装（setIntervalより信頼性が高い）
+            let lastTime = 0;
+            function animate(currentTime) {
+                if (!lastTime) lastTime = currentTime;
+                const elapsed = currentTime - lastTime;
+
+                // speed ms経過するごとに1文字追加
+                if (elapsed >= speed) {
+                    if (i < text.length) {
+                        container.textContent += text[i];
+                        i++;
+                        lastTime = currentTime;
+
+                        // スクロールを最下部に維持
+                        if (scrollContainer) {
+                            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+                        }
+                    }
+                }
+
+                if (i < text.length) {
+                    requestAnimationFrame(animate);
+                } else {
+                    container.classList.remove('typing');
+                    resolve();
+                }
+            }
+
+            requestAnimationFrame(animate);
+        });
+    }
+
+    // 各パネル用のメッセージキュー
+    const messageQueues = {
+        balthasar: [],
+        casper: [],
+        melchior: []
+    };
+
+    // 各パネルの処理中フラグ
+    const isProcessing = {
+        balthasar: false,
+        casper: false,
+        melchior: false
+    };
+
+    /**
+     * メッセージをキューに追加し、処理を開始
+     */
+    function queueMessage(unit, message, options = {}) {
+        console.log(`[TypeAnimation] 📥 queueMessage called for ${unit}, queue length before: ${messageQueues[unit].length}, isProcessing: ${isProcessing[unit]}`);
+        console.log(`[TypeAnimation] 📥 Message preview: "${(message || '').substring(0, 50)}..."`);
+        messageQueues[unit].push({ message, options });
+        if (!isProcessing[unit]) {
+            console.log(`[TypeAnimation] 🚀 Starting processQueue for ${unit}`);
+            processQueue(unit);
+        } else {
+            console.log(`[TypeAnimation] ⏳ ${unit} is already processing, message added to queue`);
+        }
+    }
+
+    /**
+     * キューを順次処理
+     */
+    async function processQueue(unit) {
+        console.log(`[TypeAnimation] 🔄 processQueue started for ${unit}`);
+        isProcessing[unit] = true;
+        while (messageQueues[unit].length > 0) {
+            const { message, options } = messageQueues[unit].shift();
+            console.log(`[TypeAnimation] ✍️ Processing message for ${unit}, remaining in queue: ${messageQueues[unit].length}`);
+            await displayMessageWithTyping(unit, message, options);
+            console.log(`[TypeAnimation] ✅ Finished typing for ${unit}`);
+        }
+        isProcessing[unit] = false;
+        console.log(`[TypeAnimation] 🏁 processQueue finished for ${unit}`);
+    }
+
+    /**
+     * タイピングアニメーションでメッセージを共通議論ログに表示
+     */
+    async function displayMessageWithTyping(unit, message, options = {}) {
+        const discussionLog = document.getElementById('magi-discussion-content');
+        if (!discussionLog) return;
+
+        // プレースホルダー削除
+        const placeholder = discussionLog.querySelector('.magi-discussion-placeholder');
+        if (placeholder) placeholder.remove();
+
+        // スピーカー名マッピング
+        const speakerMap = {
+            'balthasar': 'BALTHASAR-2',
+            'casper': 'CASPER-3',
+            'melchior': 'MELCHIOR-1'
+        };
+
+        // エントリ作成
+        const chatEntry = document.createElement('div');
+        chatEntry.className = `magi-discussion-entry magi-speaker-${unit}${options.positionChanged ? ' magi-discussion-changed' : ''}`;
+
+        // スピーカータグを先に追加
+        const speakerTag = document.createElement('span');
+        speakerTag.className = 'magi-speaker-tag';
+        speakerTag.textContent = `[${speakerMap[unit]}] `;
+        chatEntry.appendChild(speakerTag);
+
+        // メッセージ用のspan
+        const messageSpan = document.createElement('span');
+        chatEntry.appendChild(messageSpan);
+
+        discussionLog.appendChild(chatEntry);
+
+        // タイピングアニメーション（省略なしで全文表示）
+        await typeText(messageSpan, message, 15);  // 15ms/文字
+
+        discussionLog.scrollTop = discussionLog.scrollHeight;
+
+        // 投票変更があれば更新
+        if (options.positionChanged && options.newVerdict) {
+            updateVoteForUnit(unit, options.newVerdict);
+        }
+    }
+
+    /**
+     * 投票状態を更新（タイピング完了後）
+     */
+    function updateVoteForUnit(unit, newVerdict) {
+        const voteEl = document.getElementById(`${unit}-vote`);
+        if (voteEl) {
+            const verdictMap = {
+                'safe_pass': { text: 'PASS', class: 'magi-vote-pass' },
+                'unsafe_fail': { text: 'FAIL', class: 'magi-vote-fail' },
+                'needs_review': { text: 'REVIEW', class: 'magi-vote-review' }
+            };
+            const v = verdictMap[newVerdict] || { text: newVerdict, class: '' };
+            voteEl.textContent = v.text;
+            voteEl.className = `magi-unit-vote ${v.class}`;
+
+            // Re-trigger glow animation
+            const unitEl = document.getElementById(`magi-${unit}`);
+            if (unitEl) {
+                unitEl.classList.remove('vote-confirmed');
+                void unitEl.offsetWidth; // Force reflow
+                unitEl.classList.add('vote-confirmed');
+
+                if (newVerdict === 'safe_pass') {
+                    unitEl.style.setProperty('--glow-color', '#51cf66');
+                } else if (newVerdict === 'unsafe_fail') {
+                    unitEl.style.setProperty('--glow-color', '#ff6b6b');
+                } else {
+                    unitEl.style.setProperty('--glow-color', '#ffd43b');
+                }
+            }
+        }
+    }
+
+    // ==== End of Typing Animation System ====
+
+    // Initialize SSE (primary path for real-time streaming)
+    let jurySSE = null;
+    function connectSSE() {
+        const base = window.location.origin.replace(/\/$/, '');
+        const sseUrl = `${base}${urlPrefix}/sse/submissions/${submissionId}/judge`;
+        console.log('[DEBUG] Attempting SSE connection:', sseUrl);
+        try {
+            jurySSE = new EventSource(sseUrl, { withCredentials: false });
+
+            jurySSE.onopen = () => {
+                console.log('[DEBUG] 🟢 SSE connected');
+                const wsStatus = document.getElementById('ws-status');
+                if (wsStatus) {
+                    wsStatus.textContent = '接続済み (SSE)';
+                    wsStatus.className = 'ml-auto text-xs px-2 py-1 rounded bg-green-100 text-green-800';
+                }
+            };
+
+            jurySSE.onmessage = (event) => {
+                if (!event?.data) return;
+                // Reuse existing handler pipeline
+                juryStream.handleMessage({ data: event.data });
+            };
+
+            jurySSE.addEventListener('ping', () => {
+                // Heartbeat; no-op
+            });
+
+            jurySSE.onerror = (err) => {
+                console.error('[DEBUG] SSE error:', err);
+                const wsStatus = document.getElementById('ws-status');
+                if (wsStatus) {
+                    wsStatus.textContent = '再接続中 (SSE)';
+                    wsStatus.className = 'ml-auto text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800';
+                }
+                // Browser auto-reconnects EventSource; no manual reconnect needed
+            };
+        } catch (e) {
+            console.error('[DEBUG] SSE init failed:', e);
+        }
+    }
+
+    // ==== Section Streaming Renderer for PreCheck/Security/Functional ====
+
+    /**
+     * セクション全体をストリーミング表示するレンダラー
+     * - ラベルも値も全て1文字ずつタイピング
+     * - HTMLタグは即座に適用、テキストのみタイピング
+     */
+    class SectionStreamRenderer {
+        constructor(containerSelector, options = {}) {
+            this.container = document.querySelector(containerSelector);
+            this.speed = options.speed || 8; // ms per character
+            this.queue = [];
+            this.isTyping = false;
+        }
+
+        // セクションを開いてスクロール
+        openSection() {
+            const details = this.container?.closest('details');
+            if (details && !details.open) {
+                details.open = true;
+            }
+            details?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        // コンテンツをクリア
+        clear() {
+            if (this.container) {
+                this.container.innerHTML = '';
+            }
+            // キューも空にする
+            this.queue = [];
+        }
+
+        // 即時表示（タイピングなし）
+        setContent(html) {
+            if (this.container) {
+                this.container.innerHTML = html;
+            }
+        }
+
+        // テキストをキューに追加してストリーミング表示
+        async streamLine(html, options = {}) {
+            return new Promise(resolve => {
+                this.queue.push({ html, options, resolve });
+                this.processQueue();
+            });
+        }
+
+        async processQueue() {
+            if (this.isTyping || this.queue.length === 0) return;
+            this.isTyping = true;
+
+            const { html, options, resolve } = this.queue.shift();
+            await this.renderWithTyping(html, options);
+            resolve();
+
+            this.isTyping = false;
+            this.processQueue();
+        }
+
+        // HTMLをパースしてテキスト部分のみタイピング
+        async renderWithTyping(html, options = {}) {
+            const wrapper = document.createElement('div');
+            wrapper.className = options.className || '';
+
+            // HTMLをパース
+            const template = document.createElement('template');
+            template.innerHTML = html;
+
+            // コンテナに追加
+            this.container.appendChild(wrapper);
+
+            // タイピングアニメーションで表示
+            await this.typeHTML(wrapper, template.content, options.speed || this.speed);
+        }
+
+        // HTML構造を保持しながらテキストをタイピング
+        async typeHTML(container, fragment, speed) {
+            for (const node of fragment.childNodes) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    // テキストノードは1文字ずつ
+                    await this.typeTextNode(container, node.textContent, speed);
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    // 要素ノードは構造を作成してから中身をタイピング
+                    const el = document.createElement(node.tagName);
+                    // 属性をコピー
+                    for (const attr of node.attributes) {
+                        el.setAttribute(attr.name, attr.value);
+                    }
+                    container.appendChild(el);
+                    // 子ノードを再帰的に処理
+                    await this.typeHTML(el, node, speed);
+                }
+            }
+        }
+
+        async typeTextNode(container, text, speed) {
+            for (const char of text) {
+                container.appendChild(document.createTextNode(char));
+                await this.delay(speed);
+            }
+        }
+
+        delay(ms) {
+            return new Promise(r => setTimeout(r, ms));
+        }
+    }
+
+    // Initialize stream renderers for each section
+    const precheckRenderer = new SectionStreamRenderer('#precheck-content');
+    const securityRenderer = new SectionStreamRenderer('#security-content');
+    const functionalRenderer = new SectionStreamRenderer('#functional-content');
+
+    // State management for progressive display
+    let securityState = { total: 0, blocked: 0, needsReview: 0, errors: 0 };
+    let securityTestsStarted = 0;  // 開始したテスト数（プログレス表示用）
+    let processedScenarios = new Set();  // 処理済みシナリオID（二重カウント防止）
+    let functionalState = { total: 0, passed: 0, failed: 0, needsReview: 0, currentScenario: 0, currentTurn: 0, currentTotalTurns: 0 };
+
+    // ==== PreCheck Event Handlers ====
+    juryStream.on('precheck_started', async () => {
+        console.log('[Streaming] precheck_started received');
+        precheckRenderer.openSection();
+        precheckRenderer.clear();
+
+        // 「Status:」ラベルからストリーミング開始
+        await precheckRenderer.streamLine(
+            '<p class="text-sm text-gray-700"><span class="font-semibold">Status:</span> <span class="text-blue-600">検証中...</span></p>'
+        );
+    });
+
+    juryStream.on('precheck_completed', async (data) => {
+        console.log('[Streaming] precheck_completed received:', data);
+        precheckRenderer.clear();
+
+        // Toast notification
+        const warningCount = data.warnings?.length || 0;
+        const toastMsg = `PreCheck: ${data.passed ? '完了' : '失敗'}${warningCount > 0 ? ` (警告${warningCount}件)` : ''}`;
+        showToast(toastMsg, data.passed ? (warningCount > 0 ? 'warning' : 'success') : 'error');
+
+        // Status行をストリーミング
+        const statusClass = data.passed ? 'text-green-600' : 'text-red-600';
+        const statusText = data.passed ? 'Passed ✓' : 'Failed ✗';
+        await precheckRenderer.streamLine(
+            `<p class="text-sm text-gray-700"><span class="font-semibold">Status:</span> <span class="${statusClass}">${statusText}</span></p>`
+        );
+
+        // Warnings があれば表示
+        if (data.warnings && data.warnings.length > 0) {
+            await precheckRenderer.streamLine(
+                '<p class="text-sm text-yellow-600 mt-2"><span class="font-semibold">Warnings:</span></p>'
+            );
+            for (const warning of data.warnings) {
+                await precheckRenderer.streamLine(
+                    `<p class="text-xs text-yellow-600 ml-4">• ${warning}</p>`
+                );
+            }
+        }
+
+        // Errors があれば表示
+        if (data.errors && data.errors.length > 0) {
+            await precheckRenderer.streamLine(
+                '<p class="text-sm text-red-600 mt-2"><span class="font-semibold">Errors:</span></p>'
+            );
+            for (const error of data.errors) {
+                await precheckRenderer.streamLine(
+                    `<p class="text-xs text-red-600 ml-4">• ${error}</p>`
+                );
+            }
+        }
+    });
+
+    // ==== Security Gate Event Handlers ====
+    // シナリオ結果を蓄積
+    let securityScenarios = [];
+    let securityTableReady = false;  // テーブルが準備完了したかどうか
+    let securityEventQueue = [];     // イベントをキューイング
+    let securityProcessingQueue = false;  // キュー処理中フラグ
+
+    // シナリオ結果を処理する共通関数
+    async function processSecurityScenarioResult(data) {
+        // シナリオIDを取得（重複カウント防止用）
+        const scenarioId = data.promptId || `idx-${data.scenario_index}`;
+
+        // デバッグログ: イベント処理の詳細を出力
+        console.log('[DEBUG] processSecurityScenarioResult:', {
+            scenarioId,
+            category: data.category,
+            verdict: data.verdict,
+            is_batch_update: data.is_batch_update,
+            currentState: { ...securityState },
+            processedScenarios: [...processedScenarios]
+        });
+
+        // バッチ更新の場合はカウンター処理を調整（pending→最終verdictへの変換）
+        if (data.is_batch_update) {
+            // バッチ更新：pendingから最終verdictへの変換
+            // 重要：カウンターは初回のみ更新（二重カウント防止）
+            if (securityState.pending > 0) {
+                securityState.pending--;
+            }
+            // 既に処理済みのシナリオはカウンターをスキップ（verdict更新のみ）
+            if (!processedScenarios.has(scenarioId)) {
+                processedScenarios.add(scenarioId);
+                if (data.verdict === 'blocked') securityState.blocked++;
+                else if (data.verdict === 'needs_review') securityState.needsReview++;
+                else if (data.verdict === 'error') securityState.errors++;
+            }
+            // ※ バッチ更新時はverdictカラムのみ更新するため、prompt/responseのマージは不要
+        } else {
+            // 通常更新：カテゴリに応じてカウンター更新
+            if (data.category === 'pending') {
+                securityState.pending++;
+            } else {
+                if (securityState.pending > 0 && data.verdict !== 'blocked' && data.verdict !== 'error') {
+                    securityState.pending--;
+                }
+                // 既に処理済みのシナリオはカウンターをスキップ
+                if (!processedScenarios.has(scenarioId)) {
+                    processedScenarios.add(scenarioId);
+                    if (data.verdict === 'blocked') securityState.blocked++;
+                    else if (data.verdict === 'needs_review') securityState.needsReview++;
+                    else if (data.verdict === 'error') securityState.errors++;
+                }
+            }
+
+            // シナリオを蓄積（バッチ更新時は重複するためスキップ）
+            securityScenarios.push(data);
+        }
+
+        // UIを増分更新
+        updateSecurityCounts();
+        updateSecurityProgress();
+
+        // Phase 1のみ応答を表示（is_batch_updateがfalseまたは未定義の場合）
+        if (!data.is_batch_update && data.response) {
+            await updateSecurityCurrentTestResponse(data);
+        }
+
+        // テーブルへの行追加またはVerdict更新
+        // is_batch_update=true でも、行が存在しなければ追加する（blocked等の最終結果）
+        let promptId = data.promptId;
+        if (!promptId && data.scenario_index !== undefined) {
+            const savedScenario = securityScenarios.find(s => s.scenario_index === data.scenario_index);
+            if (savedScenario) {
+                promptId = savedScenario.promptId;
+            }
+        }
+        const rowId = `security-row-${promptId || data.scenario_index}`;
+        const existingRow = document.getElementById(rowId);
+
+        if (!existingRow) {
+            // 行が存在しない場合は追加（Phase 1 または is_batch_update=true の最終結果）
+            await appendSecurityScenarioToTable(data);
+        } else if (data.is_batch_update) {
+            // Phase 2: 既存行がある場合はVerdictだけを更新
+            const verdictCell = existingRow.querySelector('td:last-child span');
+            if (verdictCell) {
+                const verdictClass = data.verdict === 'blocked' ? 'bg-green-100 text-green-800' :
+                                     data.verdict === 'needs_review' ? 'bg-yellow-100 text-yellow-800' :
+                                     data.verdict === 'error' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+                verdictCell.className = `px-2 py-1 rounded text-xs ${verdictClass}`;
+                verdictCell.textContent = data.verdict;
+            }
+        }
+        if (data.verdict === 'needs_review' || data.verdict === 'error') {
+            // Phase 2の場合はsecurityScenariosからprompt/responseを取得
+            let enrichedData = data;
+            if (data.is_batch_update && data.scenario_index !== undefined) {
+                const savedScenario = securityScenarios.find(s => s.scenario_index === data.scenario_index);
+                if (savedScenario) {
+                    enrichedData = { ...data, prompt: savedScenario.prompt, response: savedScenario.response };
+                }
+            }
+            await appendSecurityNeedsReviewScenario(enrichedData);
+        }
+    }
+
+    // 「現在のテスト」表示を更新する関数（テスト開始時に呼ばれる）
+    async function updateSecurityCurrentTest(data) {
+        const testBox = document.getElementById('security-current-test');
+        const headerEl = document.getElementById('security-test-header');
+        const contentEl = document.getElementById('security-test-content');
+
+        if (!testBox || !contentEl) return;
+
+        // 表示
+        testBox.style.display = 'block';
+
+        // ヘッダー更新（カウントは「プロンプト実行中」に統一）
+        if (headerEl) {
+            headerEl.textContent = `現在のテスト`;
+        }
+
+        // コンテンツをクリアして新しい要素を作成
+        contentEl.innerHTML = '';
+
+        // Prompt ID部分
+        if (data.promptId) {
+            const idDiv = document.createElement('div');
+            idDiv.className = 'text-xs text-gray-500';
+            contentEl.appendChild(idDiv);
+            await typeTextInElement(idDiv, `📋 ID: ${data.promptId}`, 5);
+        }
+
+        // Prompt部分をストリーミング表示
+        if (data.prompt) {
+            const promptDiv = document.createElement('div');
+            promptDiv.className = 'text-red-700';
+            contentEl.appendChild(promptDiv);
+            const promptText = data.prompt.length > 150 ? data.prompt.substring(0, 150) + '...' : data.prompt;
+            await typeTextInElement(promptDiv, `🎯 攻撃: ${promptText}`, 3);
+        }
+
+        // 待機中表示を追加
+        const waitingDiv = document.createElement('div');
+        waitingDiv.className = 'text-gray-400 animate-pulse';
+        waitingDiv.id = 'security-test-waiting';
+        waitingDiv.textContent = '🔄 応答待ち...';
+        contentEl.appendChild(waitingDiv);
+    }
+
+    // 「現在のテスト」に応答を表示する関数（Phase 1のみ）
+    async function updateSecurityCurrentTestResponse(data) {
+        const contentEl = document.getElementById('security-test-content');
+        if (!contentEl) return;
+
+        // 待機中表示を削除
+        const waitingDiv = document.getElementById('security-test-waiting');
+        if (waitingDiv) waitingDiv.remove();
+
+        // Response部分を表示
+        if (data.response) {
+            const responseDiv = document.createElement('div');
+            responseDiv.className = 'text-blue-700';
+            contentEl.appendChild(responseDiv);
+            const responseText = data.response.length > 150 ? data.response.substring(0, 150) + '...' : data.response;
+            await typeTextInElement(responseDiv, `🤖 応答: ${responseText}`, 3);
+        }
+    }
+
+    // キューを逐次処理する関数
+    async function processSecurityEventQueue() {
+        if (securityProcessingQueue) return;  // 既に処理中なら何もしない
+        securityProcessingQueue = true;
+
+        while (securityEventQueue.length > 0) {
+            const data = securityEventQueue.shift();
+            if (data._eventType === 'test_started') {
+                // テスト開始イベント：現在のテスト表示を更新
+                securityTestsStarted++;  // 開始テスト数をカウント
+                updateSecurityProgress();  // プログレス表示を更新
+                await updateSecurityCurrentTest(data);
+            } else {
+                // シナリオ結果イベント：結果処理
+                await processSecurityScenarioResult(data);
+            }
+        }
+
+        securityProcessingQueue = false;
+    }
+
+    juryStream.on('security_started', async (data) => {
+        console.log('[Streaming] security_started received:', data);
+        securityRenderer.openSection();
+        securityScenarios = [];  // リセット
+        securityTableReady = false;  // テーブル準備中
+        // securityEventQueue は リセットしない（先に到着したイベントを保持）
+        securityProcessingQueue = false;  // 処理中フラグをリセット
+        securityTestsStarted = 0;  // 開始テスト数をリセット
+        processedScenarios = new Set();  // 処理済みシナリオをリセット（二重カウント防止）
+        securityCompleted = false;  // 完了フラグをリセット
+        securityState = { total: data.total_scenarios || 0, blocked: 0, needsReview: 0, errors: 0, pending: 0 };
+
+        // 新規評価開始時は常にストリーミングセクションを再描画
+        // （SSRで既存コンテンツがある場合も、新しい評価データに置き換える）
+        await renderSecuritySectionStreaming();
+
+        // テーブル準備完了
+        securityTableReady = true;
+
+        // キューに蓄積されたイベントを処理
+        console.log(`[Streaming] Processing ${securityEventQueue.length} queued security events`);
+        processSecurityEventQueue();
+    });
+
+    // テスト開始時に「現在のテスト」を表示（キューに追加して順序保証）
+    juryStream.on('security_test_started', (data) => {
+        console.log('[Streaming] security_test_started received:', data);
+        // test_startedイベントとしてキューに追加
+        securityEventQueue.push({ ...data, _eventType: 'test_started' });
+
+        // テーブルが準備完了していればキュー処理を開始
+        if (securityTableReady) {
+            processSecurityEventQueue();
+        }
+    });
+
+    let securityCompleted = false;  // security_completed受信フラグ
+
+    juryStream.on('security_scenario_result', (data) => {
+        // security_completed後のイベントは無視（重複カウント防止）
+        // ただし、is_batch_update: trueの場合は評価結果の更新なので処理する
+        if (securityCompleted && !data.is_batch_update) {
+            console.log('[Streaming] security_scenario_result ignored (after security_completed, non-batch):', data);
+            return;
+        }
+        // asyncを削除、常にキューに追加して逐次処理
+        console.log('[Streaming] security_scenario_result received:', data);
+        securityEventQueue.push({ ...data, _eventType: 'scenario_result' });
+
+        // テーブルが準備完了していればキュー処理を開始
+        if (securityTableReady) {
+            processSecurityEventQueue();
+        }
+    });
+
+    juryStream.on('security_completed', async (data) => {
+        console.log('[Streaming] security_completed received:', data);
+
+        // security_completed後のsecurity_scenario_resultを無視するためのフラグ
+        securityCompleted = true;
+
+        // キューをクリア（カウントはサーバーのsummaryで確定するため、残りイベントは不要）
+        // ※ verdict更新のみ必要な場合でも、summaryが正確な最終値を持つため処理不要
+        securityEventQueue = [];
+
+        // サーバー集計値で上書き（正確な最終値を使用）
+        // ※ リアルタイムカウントは二重加算の可能性があるため、サーバーの値を信頼
+        const summary = data.data || {};
+        securityState.total = summary.attempted ?? securityState.total;
+        securityState.blocked = summary.blocked ?? securityState.blocked;
+        securityState.needsReview = summary.needsReview ?? securityState.needsReview;
+        securityState.errors = summary.errors ?? securityState.errors;
+        updateSecurityCounts();
+        updateSecurityProgress();
+
+        // Toast notification
+        const blocked = data.data?.blocked || 0;
+        const total = data.data?.attempted || 0;
+        const toastType = blocked === total ? 'success' : 'warning';
+        showToast(`Security Gate: ${blocked}/${total} 通過`, toastType);
+
+        // 「現在のテスト」を非表示
+        const testBox = document.getElementById('security-current-test');
+        if (testBox) testBox.style.display = 'none';
+
+        // 完了状態に更新（ストリーミング表示）
+        const progressEl = document.getElementById('security-progress');
+        if (progressEl) {
+            progressEl.innerHTML = '';
+            progressEl.className = 'text-sm text-green-600 font-semibold';
+            await typeTextInElement(progressEl, '✅ 完了', 8);
+        }
+        // 評価待ち表示を消す
+        const pendingEl = document.getElementById('security-pending');
+        if (pendingEl) pendingEl.style.display = 'none';
+
+        // 「要確認シナリオ」が空の場合は「該当なし」に変更（ストリーミング表示）
+        const noIssuesEl = document.getElementById('security-no-issues');
+        if (noIssuesEl) {
+            if (securityState.needsReview === 0 && securityState.errors === 0) {
+                noIssuesEl.textContent = '';
+                noIssuesEl.className = 'text-sm text-green-600';
+                await typeTextInElement(noIssuesEl, '✅ 該当なし（全てブロック済み）', 5);
+            } else {
+                noIssuesEl.textContent = '';
+            }
+        }
+    });
+
+    async function renderSecuritySectionStreaming() {
+        // コンテナをクリア
+        securityRenderer.clear();
+
+        // 1. 基本カウントをストリーミング
+        await securityRenderer.streamLine(`
+            <div id="security-counts" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-3 rounded border">
+                    <div class="text-xs text-gray-500">Total Tests</div>
+                    <div class="text-2xl font-bold" id="security-total">${securityState.total}</div>
+                </div>
+                <div class="bg-green-50 p-3 rounded border border-green-200">
+                    <div class="text-xs text-gray-500">Blocked (Safe)</div>
+                    <div class="text-2xl font-bold text-green-600" id="security-blocked">${securityState.blocked}</div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+                    <div class="text-xs text-gray-500">Needs Review</div>
+                    <div class="text-2xl font-bold text-yellow-600" id="security-needs-review-count">${securityState.needsReview}</div>
+                </div>
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+                    <div class="text-xs text-gray-500">Errors</div>
+                    <div class="text-2xl font-bold text-red-600" id="security-errors">${securityState.errors}</div>
+                </div>
+            </div>
+        `, { speed: 2 });  // カウントは速めに
+
+        // 2. 進捗表示をストリーミング
+        await securityRenderer.streamLine(`
+            <p id="security-pending" class="text-sm text-blue-600 mb-2" style="display:none;">📝 評価待ち: <span id="security-pending-count">0</span>件</p>
+            <p id="security-progress" class="text-sm text-gray-500 mb-4">🔄 実行中... (0/${securityState.total})</p>
+        `, { speed: 5 });
+
+        // 2.5. 現在のテスト表示セクションを追加
+        await securityRenderer.streamLine(`
+            <div id="security-current-test" class="border rounded-lg p-3 bg-red-50 mb-4" style="display: none;">
+                <div class="flex items-center gap-2 text-sm font-semibold text-red-700 mb-2">
+                    <span>🔍</span>
+                    <span id="security-test-header">現在のテスト</span>
+                </div>
+                <div id="security-test-content" class="text-sm bg-white rounded p-2 border space-y-2">
+                    <div class="text-gray-400">テスト実行中...</div>
+                </div>
+            </div>
+        `, { speed: 3 });
+
+        // 3. 要確認シナリオセクションをストリーミング
+        await securityRenderer.streamLine(`
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">⚠️ 要確認シナリオ（Needs Review/Error）</h4>
+                <div id="security-needs-review-list" class="space-y-3">
+                    <p class="text-sm text-gray-400" id="security-no-issues">評価中...</p>
+                </div>
+            </div>
+        `, { speed: 4 });
+
+        // 4. テーブルセクションをストリーミング
+        await securityRenderer.streamLine(`
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📝 全セキュリティテスト一覧</h4>
+                <div class="max-h-80 overflow-auto border rounded">
+                    <table class="w-full text-xs border-collapse">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="text-left p-2 border-b">Prompt ID</th>
+                                <th class="text-left p-2 border-b">Prompt</th>
+                                <th class="text-left p-2 border-b">Response</th>
+                                <th class="text-left p-2 border-b">Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody id="security-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        `, { speed: 3 });
+
+        // 5. 確認ポイントをストリーミング
+        await securityRenderer.streamLine(`
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📋 確認ポイント</h4>
+                <ul class="text-sm space-y-1 list-disc ml-5">
+                    <li><strong>Blocked (Safe)</strong>: セキュリティ攻撃プロンプトを適切にブロックしたケース</li>
+                    <li><strong>Needs Review</strong>: 人手確認が必要なケース。「要確認シナリオ」で詳細を確認してください</li>
+                    <li>全体のブロック率 (Blocked/Total) が高いほどセキュリティ対策が有効です</li>
+                </ul>
+            </div>
+        `, { speed: 4 });
+
+        // 6. Artifactsダウンロードセクション
+        await securityRenderer.streamLine(`
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📁 Artifacts</h4>
+                <a href="/api/submissions/${submissionId}/artifacts/security"
+                   class="px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors"
+                   download="security_gate_report.jsonl">
+                    ↓ Security Gate
+                </a>
+            </div>
+        `, { speed: 3 });
+    }
+
+    function renderSecuritySectionFull() {
+        // 初期レイアウト（フル構造）- 即時表示用（非ストリーミング）
+        securityRenderer.setContent(`
+            <!-- 基本カウント -->
+            <div id="security-counts" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-3 rounded border">
+                    <div class="text-xs text-gray-500">Total Tests</div>
+                    <div class="text-2xl font-bold" id="security-total">${securityState.total}</div>
+                </div>
+                <div class="bg-green-50 p-3 rounded border border-green-200">
+                    <div class="text-xs text-gray-500">Blocked (Safe)</div>
+                    <div class="text-2xl font-bold text-green-600" id="security-blocked">${securityState.blocked}</div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+                    <div class="text-xs text-gray-500">Needs Review</div>
+                    <div class="text-2xl font-bold text-yellow-600" id="security-needs-review-count">${securityState.needsReview}</div>
+                </div>
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+                    <div class="text-xs text-gray-500">Errors</div>
+                    <div class="text-2xl font-bold text-red-600" id="security-errors">${securityState.errors}</div>
+                </div>
+            </div>
+
+            <!-- 進捗表示 -->
+            <p id="security-pending" class="text-sm text-blue-600 mb-2" style="display:none;">📝 評価待ち: <span id="security-pending-count">0</span>件</p>
+            <p id="security-progress" class="text-sm text-gray-500 mb-4">🔄 実行中... (0/${securityState.total})</p>
+
+            <!-- 要確認シナリオ -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">⚠️ 要確認シナリオ（Needs Review/Error）</h4>
+                <div id="security-needs-review-list" class="space-y-3">
+                    <p class="text-sm text-gray-400" id="security-no-issues">評価中...</p>
+                </div>
+            </div>
+
+            <!-- 全シナリオテーブル -->
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📝 全セキュリティテスト一覧</h4>
+                <div class="max-h-80 overflow-auto border rounded">
+                    <table class="w-full text-xs border-collapse">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="text-left p-2 border-b">Prompt ID</th>
+                                <th class="text-left p-2 border-b">Prompt</th>
+                                <th class="text-left p-2 border-b">Response</th>
+                                <th class="text-left p-2 border-b">Verdict</th>
+                            </tr>
+                        </thead>
+                        <tbody id="security-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 確認ポイント -->
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📋 確認ポイント</h4>
+                <ul class="text-sm space-y-1 list-disc ml-5">
+                    <li><strong>Blocked (Safe)</strong>: セキュリティ攻撃プロンプトを適切にブロックしたケース</li>
+                    <li><strong>Needs Review</strong>: 人手確認が必要なケース。「要確認シナリオ」で詳細を確認してください</li>
+                    <li>全体のブロック率 (Blocked/Total) が高いほどセキュリティ対策が有効です</li>
+                </ul>
+            </div>
+
+            <!-- Artifacts Download -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📁 Artifacts</h4>
+                <a href="/api/submissions/${submissionId}/artifacts/security"
+                   class="px-3 py-1.5 text-sm font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors"
+                   download="security_gate_report.jsonl">
+                    ↓ Security Gate
+                </a>
+            </div>
+        `);
+    }
+
+    function updateSecurityCounts() {
+        const totalEl = document.getElementById('security-total');
+        const blockedEl = document.getElementById('security-blocked');
+        const needsReviewEl = document.getElementById('security-needs-review-count');
+        const errorsEl = document.getElementById('security-errors');
+
+        if (totalEl) totalEl.textContent = securityState.total;
+        if (blockedEl) blockedEl.textContent = securityState.blocked;
+        if (needsReviewEl) needsReviewEl.textContent = securityState.needsReview;
+        if (errorsEl) errorsEl.textContent = securityState.errors;
+
+        // サマリー表示もリアルタイム更新（Security Gateでは blocked=passed, errors=failed）
+        const summaryPassedEl = document.getElementById('summary-security-passed');
+        const summaryNeedsEl = document.getElementById('summary-security-needs');
+        const summaryFailedEl = document.getElementById('summary-security-failed');
+        if (summaryPassedEl) summaryPassedEl.textContent = securityState.blocked;
+        if (summaryNeedsEl) summaryNeedsEl.textContent = securityState.needsReview;
+        if (summaryFailedEl) summaryFailedEl.textContent = securityState.errors;
+        // サマリーのtotal（分母）も更新
+        document.querySelectorAll('.summary-security-total').forEach(el => {
+            el.textContent = securityState.total;
+        });
+    }
+
+    function updateSecurityProgress() {
+        const evaluated = securityState.blocked + securityState.needsReview + securityState.errors;
+
+        // 進捗テキスト更新
+        const progressEl = document.getElementById('security-progress');
+        if (progressEl) {
+            if (securityTestsStarted > 0 && securityTestsStarted < securityState.total) {
+                // Phase 1: テスト実行中（開始済みテスト数/全体）
+                progressEl.textContent = `⏳ プロンプト実行中... (${securityTestsStarted}/${securityState.total})`;
+            } else if (securityTestsStarted >= securityState.total && evaluated < securityState.total) {
+                // Phase 2: LLM評価中（全テスト完了後）
+                progressEl.textContent = `🔍 評価中... (${evaluated}/${securityState.total})`;
+            } else if (evaluated >= securityState.total) {
+                // 完了
+                progressEl.textContent = `✅ 評価完了 (${evaluated}/${securityState.total})`;
+            } else {
+                // 初期状態
+                progressEl.textContent = `🔄 準備中...`;
+            }
+        }
+
+        // 評価待ち表示
+        const pendingEl = document.getElementById('security-pending');
+        const pendingCountEl = document.getElementById('security-pending-count');
+        if (pendingEl && pendingCountEl) {
+            if (securityState.pending > 0) {
+                pendingEl.style.display = 'block';
+                pendingCountEl.textContent = securityState.pending;
+            } else {
+                pendingEl.style.display = 'none';
+            }
+        }
+    }
+
+    async function appendSecurityScenarioToTable(data) {
+        // SSEストリーミング用（security-table-body）を優先、次にSSR用（securityScenariosTableBody）
+        const tbody = document.getElementById('security-table-body') || document.getElementById('securityScenariosTableBody');
+        if (!tbody) {
+            console.warn('[appendSecurityScenarioToTable] No table body found');
+            return;
+        }
+
+        // promptIdベースで行を特定
+        const rowId = `security-row-${data.promptId || data.scenario_index}`;
+        let row = document.getElementById(rowId);
+
+        // ★ 既存の行がある場合は何もしない（上書き防止）
+        if (row) {
+            return;
+        }
+
+        const verdictClass = data.verdict === 'blocked' ? 'bg-green-100 text-green-800' :
+                             data.verdict === 'needs_review' ? 'bg-yellow-100 text-yellow-800' :
+                             data.verdict === 'error' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800';
+
+        const promptText = (data.prompt || '').substring(0, 100);
+        const responseText = (data.response || '').substring(0, 100);
+
+        // 新規行を作成
+        row = document.createElement('tr');
+        row.id = rowId;
+        row.className = 'border-b hover:bg-gray-50';
+        tbody.appendChild(row);
+
+        // 行のセルを作成
+        const cells = [
+            { content: data.promptId || 'N/A', className: 'p-2 text-xs' },
+            { content: promptText + (promptText.length >= 100 ? '...' : ''), className: 'p-2', isCode: true },
+            { content: responseText + (responseText.length >= 100 ? '...' : ''), className: 'p-2', isCode: true },
+            { content: data.verdict, className: 'p-2', badge: verdictClass }
+        ];
+        for (const cell of cells) {
+            const td = document.createElement('td');
+            td.className = cell.className;
+            row.appendChild(td);
+
+            if (cell.badge) {
+                const span = document.createElement('span');
+                span.className = `px-2 py-1 rounded text-xs ${cell.badge}`;
+                td.appendChild(span);
+                await typeTextInElement(span, cell.content, 2);
+            } else if (cell.isCode) {
+                const pre = document.createElement('pre');
+                pre.className = 'whitespace-pre-wrap text-xs';
+                td.appendChild(pre);
+                await typeTextInElement(pre, cell.content, 2);
+            } else {
+                await typeTextInElement(td, cell.content, 2);
+            }
+        }
+    }
+
+    // テキストをタイピングアニメーションで要素に追加
+    async function typeTextInElement(element, text, speed = 5) {
+        for (const char of text) {
+            element.appendChild(document.createTextNode(char));
+            await new Promise(r => setTimeout(r, speed));
+        }
+    }
+
+    async function appendSecurityNeedsReviewScenario(data) {
+        const container = document.getElementById('security-needs-review-list');
+        if (!container) return;
+
+        // 「評価中...」を消す
+        const noIssuesEl = document.getElementById('security-no-issues');
+        if (noIssuesEl) noIssuesEl.remove();
+
+        const div = document.createElement('div');
+        div.className = 'border border-yellow-300 rounded-lg p-3 bg-yellow-50';
+        container.appendChild(div);
+
+        const verdictClass = data.verdict === 'error' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
+        const promptText = data.prompt || 'N/A';
+        const responseText = data.response || 'N/A';
+
+        // ヘッダー部分（Prompt ID + Verdict バッジ）
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'font-semibold text-sm mb-1';
+        div.appendChild(headerDiv);
+        await typeTextInElement(headerDiv, data.promptId || '匿名', 2);
+
+        const verdictSpan = document.createElement('span');
+        verdictSpan.className = `ml-2 text-xs px-2 py-1 rounded ${verdictClass}`;
+        headerDiv.appendChild(verdictSpan);
+        await typeTextInElement(verdictSpan, data.verdict, 3);
+
+        // Category/Perspective
+        const metaDiv = document.createElement('div');
+        metaDiv.className = 'text-xs text-gray-600 mb-2';
+        div.appendChild(metaDiv);
+        await typeTextInElement(metaDiv, `Category: ${data.category || 'N/A'}${data.perspective ? ` | Perspective: ${data.perspective}` : ''}`, 1);
+
+        // Prompt
+        const promptLabelDiv = document.createElement('div');
+        promptLabelDiv.className = 'text-xs mb-2';
+        div.appendChild(promptLabelDiv);
+
+        const promptStrong = document.createElement('strong');
+        promptLabelDiv.appendChild(promptStrong);
+        await typeTextInElement(promptStrong, 'Prompt:', 3);
+
+        const promptPre = document.createElement('pre');
+        promptPre.className = 'mt-1 whitespace-pre-wrap bg-white p-2 rounded text-xs';
+        promptLabelDiv.appendChild(promptPre);
+        await typeTextInElement(promptPre, promptText, 1);
+
+        // Response
+        const responseLabelDiv = document.createElement('div');
+        responseLabelDiv.className = 'text-xs mb-2';
+        div.appendChild(responseLabelDiv);
+
+        const responseStrong = document.createElement('strong');
+        responseLabelDiv.appendChild(responseStrong);
+        await typeTextInElement(responseStrong, 'Response:', 3);
+
+        const responsePre = document.createElement('pre');
+        responsePre.className = 'mt-1 whitespace-pre-wrap bg-white p-2 rounded text-xs';
+        responseLabelDiv.appendChild(responsePre);
+        await typeTextInElement(responsePre, responseText, 1);
+
+        // Reason
+        const reasonDiv = document.createElement('div');
+        reasonDiv.className = 'text-xs text-gray-700';
+        div.appendChild(reasonDiv);
+
+        const reasonStrong = document.createElement('strong');
+        reasonDiv.appendChild(reasonStrong);
+        await typeTextInElement(reasonStrong, 'Reason: ', 3);
+
+        const reasonSpan = document.createElement('span');
+        reasonDiv.appendChild(reasonSpan);
+        await typeTextInElement(reasonSpan, data.rationale || 'N/A', 1);
+    }
+
+    // ==== Agent Card Accuracy (Functional) Event Handlers ====
+    // シナリオ結果を蓄積
+    let functionalScenarios = [];
+    let functionalEventQueue = [];      // イベントをキューイング
+    let functionalTableReady = false;   // テーブルが準備完了したかどうか
+    let functionalProcessingQueue = false; // キュー処理中フラグ
+
+    // Functionalイベントキュー処理
+    async function processFunctionalEventQueue() {
+        if (functionalProcessingQueue) return;
+        functionalProcessingQueue = true;
+
+        while (functionalEventQueue.length > 0) {
+            const data = functionalEventQueue.shift();
+            if (data._eventType === 'turn_progress') {
+                await processFunctionalTurnProgress(data);
+            } else if (data._eventType === 'scenario_result') {
+                await processFunctionalScenarioResult(data);
+            }
+        }
+
+        functionalProcessingQueue = false;
+    }
+
+    juryStream.on('functional_started', async (data) => {
+        console.log('[Streaming] functional_started received:', data);
+        functionalRenderer.openSection();
+        functionalScenarios = [];  // リセット
+        functionalTableReady = false;  // テーブル準備中
+        // functionalEventQueue は リセットしない（先に到着したイベントを保持）
+        functionalProcessingQueue = false;  // 処理中フラグをリセット
+        functionalState = { total: data.total_scenarios || 0, passed: 0, failed: 0, needsReview: 0, currentScenario: 0, currentTurn: 0, currentTotalTurns: 0 };
+
+        // サーバーサイドで既に表示済みの場合はストリーミングをスキップ
+        const hasServerContent = document.querySelector('#agent-card-accuracy-content .grid');
+        if (!hasServerContent) {
+            // ストリーミングアニメーション表示
+            await renderFunctionalSectionStreaming();
+        }
+
+        // テーブル準備完了
+        functionalTableReady = true;
+
+        // キューに蓄積されたイベントを処理
+        console.log(`[Streaming] Processing ${functionalEventQueue.length} queued functional events`);
+        processFunctionalEventQueue();
+    });
+
+    juryStream.on('functional_scenario_result', (data) => {
+        console.log('[Streaming] functional_scenario_result received:', data);
+        // キューに追加
+        functionalEventQueue.push({ ...data, _eventType: 'scenario_result' });
+
+        // テーブルが準備完了していればキュー処理を開始
+        if (functionalTableReady) {
+            processFunctionalEventQueue();
+        }
+    });
+
+    // シナリオ結果の実処理
+    async function processFunctionalScenarioResult(data) {
+        // カウンター更新
+        if (data.verdict === 'pass') functionalState.passed++;
+        else if (data.verdict === 'fail') functionalState.failed++;
+        else if (data.verdict === 'needs_review') functionalState.needsReview++;
+        else if (data.verdict === 'error') functionalState.failed++;
+
+        // ターン進捗をリセット
+        functionalState.currentTurn = 0;
+        functionalState.currentTotalTurns = 0;
+
+        // 対話ボックスをリセット（次のシナリオ用に応答待ち状態に）
+        const dialogueContent = document.getElementById('functional-dialogue-content');
+        if (dialogueContent) {
+            dialogueContent.innerHTML = '<div class="text-gray-400">次のシナリオを待機中...</div>';
+        }
+
+        // シナリオを蓄積
+        functionalScenarios.push(data);
+
+        // 「評価中...」テキストを非表示（passでも非表示にする）
+        const noFailuresEl = document.getElementById('functional-no-failures');
+        if (noFailuresEl) noFailuresEl.style.display = 'none';
+
+        // UIを増分更新
+        updateFunctionalCounts();
+        updateFunctionalProgress();
+
+        // 全シナリオ一覧テーブルに追加（Pass/Fail関係なく全て）
+        await appendFunctionalScenarioToTable(data);
+
+        // 失敗シナリオの詳細表示（失敗/Needs Reviewのみ）
+        if (data.verdict !== 'pass') {
+            await appendFunctionalFailedScenario(data);
+        }
+    }
+
+    juryStream.on('functional_turn_progress', (data) => {
+        console.log('[Streaming] functional_turn_progress received:', data);
+        // キューに追加
+        functionalEventQueue.push({ ...data, _eventType: 'turn_progress' });
+
+        // テーブルが準備完了していればキュー処理を開始
+        if (functionalTableReady) {
+            processFunctionalEventQueue();
+        }
+    });
+
+    // ターン進捗の実処理
+    async function processFunctionalTurnProgress(data) {
+        functionalState.currentScenario = data.scenario_index;
+        functionalState.currentTurn = data.turn;
+        functionalState.currentTotalTurns = data.total_turns;
+        updateFunctionalProgress();
+
+        // 対話プレビュー表示（ストリーミングアニメーション）
+        const dialogueBox = document.getElementById('functional-current-dialogue');
+        const headerEl = document.getElementById('functional-dialogue-header');
+        const contentEl = document.getElementById('functional-dialogue-content');
+
+        if (dialogueBox && contentEl) {
+            dialogueBox.style.display = 'block';
+            if (headerEl) {
+                headerEl.textContent = `現在の対話 (ターン ${data.turn}/${data.total_turns})`;
+            }
+
+            // コンテンツをクリアして新しい要素を作成
+            contentEl.innerHTML = '';
+
+            // User部分をストリーミング表示
+            if (data.user_prompt) {
+                const userDiv = document.createElement('div');
+                userDiv.className = 'text-gray-600 mb-1';
+                contentEl.appendChild(userDiv);
+                await typeTextInElement(userDiv, `👤 User: ${data.user_prompt}`, 8);
+            }
+
+            // Agent部分をストリーミング表示
+            if (data.agent_response_preview) {
+                const agentDiv = document.createElement('div');
+                agentDiv.className = 'text-blue-700';
+                contentEl.appendChild(agentDiv);
+                await typeTextInElement(agentDiv, `🤖 Agent: ${data.agent_response_preview}`, 8);
+            }
+
+            // 両方ない場合は待機表示
+            if (!data.user_prompt && !data.agent_response_preview) {
+                contentEl.innerHTML = '<div class="text-gray-400">応答待ち...</div>';
+            }
+        }
+    }
+
+    juryStream.on('functional_completed', async (data) => {
+        console.log('[Streaming] functional_completed received:', data);
+
+        // Toast notification
+        const passed = functionalState.passed || 0;
+        const total = functionalState.total || 0;
+        const toastType = passed === total ? 'success' : 'warning';
+        showToast(`Agent Card Accuracy: ${passed}/${total} シナリオ通過`, toastType);
+
+        // 対話ボックスを非表示
+        const dialogueBox = document.getElementById('functional-current-dialogue');
+        if (dialogueBox) {
+            dialogueBox.style.display = 'none';
+        }
+
+        // 完了状態に更新（ストリーミング表示）
+        const progressEl = document.getElementById('functional-progress');
+        if (progressEl) {
+            progressEl.innerHTML = '';
+            progressEl.className = 'text-sm text-green-600 font-semibold';
+            await typeTextInElement(progressEl, `✅ 評価完了 (${functionalState.total}/${functionalState.total})`, 30);
+        }
+
+        // 「評価中...」テキストを適切なメッセージに変更（ストリーミング表示）
+        const noFailuresEl = document.getElementById('functional-no-failures');
+        if (noFailuresEl) {
+            if (functionalState.failed === 0 && functionalState.needsReview === 0) {
+                noFailuresEl.textContent = '';
+                noFailuresEl.style.display = 'block';
+                noFailuresEl.className = 'text-sm text-green-600';
+                await typeTextInElement(noFailuresEl, '✅ すべてのシナリオがパスしました', 20);
+            } else {
+                noFailuresEl.style.display = 'none';
+            }
+        }
+    });
+
+    async function renderFunctionalSectionStreaming() {
+        // コンテナをクリア
+        functionalRenderer.clear();
+
+        // 1. 基本カウントをストリーミング
+        await functionalRenderer.streamLine(`
+            <div id="functional-counts" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-3 rounded border">
+                    <div class="text-xs text-gray-500">Total Scenarios</div>
+                    <div class="text-2xl font-bold" id="functional-total">${functionalState.total}</div>
+                </div>
+                <div class="bg-green-50 p-3 rounded border border-green-200">
+                    <div class="text-xs text-gray-500">Passed</div>
+                    <div class="text-2xl font-bold text-green-600" id="functional-passed">${functionalState.passed}</div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+                    <div class="text-xs text-gray-500">Needs Review</div>
+                    <div class="text-2xl font-bold text-yellow-600" id="functional-needs-review">${functionalState.needsReview}</div>
+                </div>
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+                    <div class="text-xs text-gray-500">Failed</div>
+                    <div class="text-2xl font-bold text-red-600" id="functional-failed">${functionalState.failed}</div>
+                </div>
+            </div>
+        `, { speed: 2 });
+
+        // 2. 進捗表示をストリーミング
+        await functionalRenderer.streamLine(`
+            <p id="functional-progress" class="text-sm text-gray-500 mb-4">🔄 評価中... (0/${functionalState.total})</p>
+        `, { speed: 5 });
+
+        // 2.5. 現在の対話セクション（リアルタイム表示用）
+        await functionalRenderer.streamLine(`
+            <div id="functional-current-dialogue" class="border rounded-lg p-3 bg-blue-50 mb-4" style="display: none;">
+                <div class="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-2">
+                    <span>💬</span>
+                    <span id="functional-dialogue-header">現在の対話</span>
+                </div>
+                <div id="functional-dialogue-content" class="text-sm bg-white rounded p-2 border">
+                    <div class="text-gray-400">応答待ち...</div>
+                </div>
+            </div>
+        `, { speed: 3 });
+
+        // 3. 失敗シナリオセクションをストリーミング
+        await functionalRenderer.streamLine(`
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">❌ 失敗シナリオの詳細</h4>
+                <div id="functional-failed-list" class="space-y-3">
+                    <p class="text-sm text-gray-400" id="functional-no-failures">評価中...</p>
+                </div>
+            </div>
+        `, { speed: 4 });
+
+        // 4. 全シナリオ一覧テーブルをストリーミング
+        await functionalRenderer.streamLine(`
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📝 全シナリオ一覧</h4>
+                <div class="max-h-80 overflow-auto border rounded">
+                    <table class="w-full text-xs border-collapse">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="text-left p-2 border-b">シナリオ</th>
+                                <th class="text-left p-2 border-b">プロンプト</th>
+                                <th class="text-left p-2 border-b">応答</th>
+                                <th class="text-left p-2 border-b">判定</th>
+                            </tr>
+                        </thead>
+                        <tbody id="functional-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        `, { speed: 3 });
+
+        // 5. 確認ポイントをストリーミング
+        await functionalRenderer.streamLine(`
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📋 確認ポイント</h4>
+                <ul class="text-sm space-y-1 list-disc ml-5">
+                    <li><strong>Passed</strong>: エージェントが正しく応答したケース</li>
+                    <li><strong>Needs Review</strong>: 人手確認が必要なケース</li>
+                    <li><strong>Failed</strong>: エージェントの応答が期待と異なるケース</li>
+                </ul>
+            </div>
+        `, { speed: 4 });
+
+        // 6. Artifactsダウンロードセクション
+        await functionalRenderer.streamLine(`
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📁 Artifacts</h4>
+                <a href="/api/submissions/${submissionId}/artifacts/functional"
+                   class="px-3 py-1.5 text-sm font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md transition-colors"
+                   download="agent_card_accuracy_report.jsonl">
+                    ↓ Agent Card Accuracy
+                </a>
+            </div>
+        `, { speed: 3 });
+    }
+
+    function renderFunctionalSectionFull() {
+        functionalRenderer.setContent(`
+            <!-- 基本カウント -->
+            <div id="functional-counts" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                <div class="bg-white p-3 rounded border">
+                    <div class="text-xs text-gray-500">Total Scenarios</div>
+                    <div class="text-2xl font-bold" id="functional-total">${functionalState.total}</div>
+                </div>
+                <div class="bg-green-50 p-3 rounded border border-green-200">
+                    <div class="text-xs text-gray-500">Passed</div>
+                    <div class="text-2xl font-bold text-green-600" id="functional-passed">${functionalState.passed}</div>
+                </div>
+                <div class="bg-yellow-50 p-3 rounded border border-yellow-200">
+                    <div class="text-xs text-gray-500">Needs Review</div>
+                    <div class="text-2xl font-bold text-yellow-600" id="functional-needs-review">${functionalState.needsReview}</div>
+                </div>
+                <div class="bg-red-50 p-3 rounded border border-red-200">
+                    <div class="text-xs text-gray-500">Failed</div>
+                    <div class="text-2xl font-bold text-red-600" id="functional-failed">${functionalState.failed}</div>
+                </div>
+            </div>
+
+            <!-- 進捗表示 -->
+            <p id="functional-progress" class="text-sm text-gray-500 mb-4">🔄 評価中... (0/${functionalState.total})</p>
+
+            <!-- 現在の対話セクション（リアルタイム表示用） -->
+            <div id="functional-current-dialogue" class="border rounded-lg p-3 bg-blue-50 mb-4" style="display: none;">
+                <div class="flex items-center gap-2 text-sm font-semibold text-blue-700 mb-2">
+                    <span>💬</span>
+                    <span id="functional-dialogue-header">現在の対話</span>
+                </div>
+                <div id="functional-dialogue-content" class="text-sm bg-white rounded p-2 border">
+                    <div class="text-gray-400">応答待ち...</div>
+                </div>
+            </div>
+
+            <!-- 失敗シナリオ詳細 -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">❌ 失敗シナリオの詳細</h4>
+                <div id="functional-failed-list" class="space-y-3">
+                    <p class="text-sm text-gray-400" id="functional-no-failures">評価中...</p>
+                </div>
+            </div>
+
+            <!-- 全シナリオ一覧テーブル -->
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📝 全シナリオ一覧</h4>
+                <div class="max-h-80 overflow-auto border rounded">
+                    <table class="w-full text-xs border-collapse">
+                        <thead class="bg-gray-100 sticky top-0">
+                            <tr>
+                                <th class="text-left p-2 border-b">シナリオ</th>
+                                <th class="text-left p-2 border-b">プロンプト</th>
+                                <th class="text-left p-2 border-b">応答</th>
+                                <th class="text-left p-2 border-b">判定</th>
+                            </tr>
+                        </thead>
+                        <tbody id="functional-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 確認ポイント -->
+            <div class="border-t pt-4 mt-4">
+                <h4 class="font-semibold mb-2">📋 確認ポイント</h4>
+                <ul class="text-sm space-y-1 list-disc ml-5">
+                    <li><strong>Passed</strong>: エージェントが正しく応答したケース</li>
+                    <li><strong>Needs Review</strong>: 人手確認が必要なケース</li>
+                    <li><strong>Failed</strong>: エージェントの応答が期待と異なるケース</li>
+                </ul>
+            </div>
+
+            <!-- Artifacts Download -->
+            <div class="border-t pt-4">
+                <h4 class="font-semibold mb-2">📁 Artifacts</h4>
+                <a href="/api/submissions/${submissionId}/artifacts/functional"
+                   class="px-3 py-1.5 text-sm font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md transition-colors"
+                   download="agent_card_accuracy_report.jsonl">
+                    ↓ Agent Card Accuracy
+                </a>
+            </div>
+        `);
+    }
+
+    function updateFunctionalCounts() {
+        const totalEl = document.getElementById('functional-total');
+        const passedEl = document.getElementById('functional-passed');
+        const needsReviewEl = document.getElementById('functional-needs-review');
+        const failedEl = document.getElementById('functional-failed');
+
+        if (totalEl) totalEl.textContent = functionalState.total;
+        if (passedEl) passedEl.textContent = functionalState.passed;
+        if (needsReviewEl) needsReviewEl.textContent = functionalState.needsReview;
+        if (failedEl) failedEl.textContent = functionalState.failed;
+
+        // サマリー表示もリアルタイム更新
+        const summaryPassedEl = document.getElementById('summary-functional-passed');
+        const summaryNeedsEl = document.getElementById('summary-functional-needs');
+        const summaryFailedEl = document.getElementById('summary-functional-failed');
+        if (summaryPassedEl) summaryPassedEl.textContent = functionalState.passed;
+        if (summaryNeedsEl) summaryNeedsEl.textContent = functionalState.needsReview;
+        if (summaryFailedEl) summaryFailedEl.textContent = functionalState.failed;
+        // サマリーのtotal（分母）も更新
+        document.querySelectorAll('.summary-functional-total').forEach(el => {
+            el.textContent = functionalState.total;
+        });
+    }
+
+    function updateFunctionalProgress() {
+        const current = functionalState.passed + functionalState.failed + functionalState.needsReview;
+        const progressEl = document.getElementById('functional-progress');
+        if (!progressEl) return;
+
+        if (functionalState.currentTurn > 0) {
+            progressEl.textContent = `💬 シナリオ ${functionalState.currentScenario + 1}/${functionalState.total} - 対話中: ターン ${functionalState.currentTurn}/${functionalState.currentTotalTurns}`;
+        } else {
+            progressEl.textContent = `🔄 評価中... (${current}/${functionalState.total})`;
+        }
+    }
+
+    async function appendFunctionalScenarioToTable(data) {
+        const tbody = document.getElementById('functional-table-body');
+        if (!tbody) return;
+
+        const verdictClass = data.verdict === 'pass' ? 'bg-green-100 text-green-800' :
+                             data.verdict === 'fail' ? 'bg-red-100 text-red-800' :
+                             data.verdict === 'needs_review' ? 'bg-yellow-100 text-yellow-800' :
+                             'bg-gray-100 text-gray-800';
+
+        // シナリオIDを取得
+        const scenarioId = data.scenarioId || data.scenario_name || `scenario-${data.scenario_index || 0}`;
+
+        // プロンプトを取得（100文字に切り詰め）
+        const promptText = (data.prompt || '').substring(0, 100);
+
+        // レスポンスを取得（100文字に切り詰め）- トップレベルから直接取得
+        const responseText = (data.response || '').substring(0, 100);
+
+        const rowId = `functional-row-${data.scenario_index || 0}`;
+
+        let row = document.getElementById(rowId);
+        if (!row) {
+            row = document.createElement('tr');
+            row.id = rowId;
+            row.className = 'border-b hover:bg-gray-50';
+            tbody.appendChild(row);
+        }
+
+        // 内容をセット（シナリオ、プロンプト、応答、判定の4列）
+        row.innerHTML = `
+            <td class="p-2 max-w-xs truncate" title="${scenarioId}">${scenarioId}</td>
+            <td class="p-2 max-w-xs"><pre class="whitespace-pre-wrap text-xs">${promptText || '-'}</pre></td>
+            <td class="p-2 max-w-xs"><pre class="whitespace-pre-wrap text-xs">${responseText || '-'}</pre></td>
+            <td class="p-2"><span class="px-2 py-1 rounded text-xs ${verdictClass}">${data.verdict}</span></td>
+        `;
+    }
+
+    async function appendFunctionalFailedScenario(data) {
+        const container = document.getElementById('functional-failed-list');
+        if (!container) return;
+
+        // 「評価中...」を非表示（削除ではなく非表示にして、完了時に再利用可能に）
+        const noFailuresEl = document.getElementById('functional-no-failures');
+        if (noFailuresEl) noFailuresEl.style.display = 'none';
+
+        const div = document.createElement('div');
+        div.className = 'border border-gray-300 rounded-lg p-3 bg-white';
+        container.appendChild(div);
+
+        const verdictClass = data.verdict === 'fail' ? 'bg-red-100 text-red-800' :
+                             data.verdict === 'needs_review' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800';
+
+        // ヘッダー部分（シナリオ名 + Verdict バッジ）
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'font-semibold text-sm mb-1';
+        div.appendChild(headerDiv);
+        await typeTextInElement(headerDiv, data.scenarioId || data.scenario_name || '匿名', 5);
+
+        const verdictSpan = document.createElement('span');
+        verdictSpan.className = `ml-2 text-xs px-2 py-1 rounded ${verdictClass}`;
+        headerDiv.appendChild(verdictSpan);
+        await typeTextInElement(verdictSpan, data.verdict, 10);
+
+        // Turns表示
+        if (data.totalTurns) {
+            const turnsDiv = document.createElement('div');
+            turnsDiv.className = 'text-xs text-gray-600 mb-2';
+            div.appendChild(turnsDiv);
+            await typeTextInElement(turnsDiv, `Turns: ${data.totalTurns}`, 5);
+        }
+
+        // 対話履歴（あれば）
+        if (data.dialogueHistory && data.dialogueHistory.length > 0) {
+            const dialogueContainer = document.createElement('div');
+            dialogueContainer.className = 'text-xs mb-2 border-l-4 border-purple-400 pl-3';
+            div.appendChild(dialogueContainer);
+
+            const dialogueTitle = document.createElement('strong');
+            dialogueTitle.className = 'text-purple-700';
+            dialogueContainer.appendChild(dialogueTitle);
+            await typeTextInElement(dialogueTitle, `💬 対話履歴 (${data.totalTurns || data.dialogueHistory.length} turns):`, 3);
+
+            const turnsContainer = document.createElement('div');
+            turnsContainer.className = 'space-y-2 mt-2';
+            dialogueContainer.appendChild(turnsContainer);
+
+            for (const turn of data.dialogueHistory) {
+                const turnDiv = document.createElement('div');
+                turnDiv.className = 'bg-white p-2 rounded border';
+                turnsContainer.appendChild(turnDiv);
+
+                const turnHeader = document.createElement('div');
+                turnHeader.className = 'font-semibold text-purple-600 mb-1';
+                turnDiv.appendChild(turnHeader);
+                await typeTextInElement(turnHeader, `Turn ${turn.turn}`, 5);
+
+                // User
+                const userDiv = document.createElement('div');
+                userDiv.className = 'mb-1';
+                turnDiv.appendChild(userDiv);
+                const userLabel = document.createElement('span');
+                userLabel.className = 'font-medium text-gray-700';
+                userDiv.appendChild(userLabel);
+                await typeTextInElement(userLabel, 'User:', 5);
+                const userPre = document.createElement('pre');
+                userPre.className = 'mt-0.5 whitespace-pre-wrap bg-blue-50 p-1.5 rounded text-xs';
+                userDiv.appendChild(userPre);
+                await typeTextInElement(userPre, turn.user || '', 1);
+
+                // Agent
+                const agentDiv = document.createElement('div');
+                turnDiv.appendChild(agentDiv);
+                const agentLabel = document.createElement('span');
+                agentLabel.className = 'font-medium text-gray-700';
+                agentDiv.appendChild(agentLabel);
+                await typeTextInElement(agentLabel, 'Agent:', 5);
+                const agentPre = document.createElement('pre');
+                agentPre.className = 'mt-0.5 whitespace-pre-wrap bg-green-50 p-1.5 rounded text-xs';
+                agentDiv.appendChild(agentPre);
+                await typeTextInElement(agentPre, turn.agent || '', 1);
+            }
+        } else {
+            // 対話履歴がない場合は Prompt/Response を表示
+            // Prompt
+            const promptDiv = document.createElement('div');
+            promptDiv.className = 'text-xs mb-2';
+            div.appendChild(promptDiv);
+            const promptStrong = document.createElement('strong');
+            promptDiv.appendChild(promptStrong);
+            await typeTextInElement(promptStrong, 'Prompt:', 5);
+            const promptPre = document.createElement('pre');
+            promptPre.className = 'mt-1 whitespace-pre-wrap bg-gray-50 p-2 rounded';
+            promptDiv.appendChild(promptPre);
+            await typeTextInElement(promptPre, data.prompt || 'N/A', 1);
+
+            // Response
+            const responseDiv = document.createElement('div');
+            responseDiv.className = 'text-xs mb-2';
+            div.appendChild(responseDiv);
+            const responseStrong = document.createElement('strong');
+            responseDiv.appendChild(responseStrong);
+            await typeTextInElement(responseStrong, 'Response:', 5);
+            const responsePre = document.createElement('pre');
+            responsePre.className = 'mt-1 whitespace-pre-wrap bg-gray-50 p-2 rounded';
+            responseDiv.appendChild(responsePre);
+            await typeTextInElement(responsePre, data.response || 'N/A', 1);
+        }
+
+        // Expected
+        const expectedDiv = document.createElement('div');
+        expectedDiv.className = 'text-xs mb-2';
+        div.appendChild(expectedDiv);
+        const expectedStrong = document.createElement('strong');
+        expectedDiv.appendChild(expectedStrong);
+        await typeTextInElement(expectedStrong, 'Expected:', 5);
+        const expectedPre = document.createElement('pre');
+        expectedPre.className = 'mt-1 whitespace-pre-wrap bg-gray-50 p-2 rounded';
+        expectedDiv.appendChild(expectedPre);
+        await typeTextInElement(expectedPre, data.expected || 'N/A', 1);
+
+        // 品質指標（あれば）
+        if (data.taskCompletion !== undefined && data.taskCompletion !== null) {
+            const metricsDiv = document.createElement('div');
+            metricsDiv.className = 'text-xs mb-2 bg-purple-50 p-2 rounded border border-purple-200';
+            div.appendChild(metricsDiv);
+
+            const metricsTitle = document.createElement('strong');
+            metricsTitle.className = 'text-purple-700';
+            metricsDiv.appendChild(metricsTitle);
+            await typeTextInElement(metricsTitle, 'マルチターン品質指標', 5);
+
+            const metricsGrid = document.createElement('div');
+            metricsGrid.className = 'grid grid-cols-3 gap-2 mt-1';
+            metricsDiv.appendChild(metricsGrid);
+
+            // タスク完了度
+            const tcDiv = document.createElement('div');
+            metricsGrid.appendChild(tcDiv);
+            const tcSpan = document.createElement('span');
+            tcSpan.className = 'text-gray-600';
+            tcDiv.appendChild(tcSpan);
+            await typeTextInElement(tcSpan, 'タスク完了度: ', 3);
+            const tcValue = document.createElement('span');
+            tcValue.className = 'font-medium';
+            tcDiv.appendChild(tcValue);
+            await typeTextInElement(tcValue, typeof data.taskCompletion === 'number' ? data.taskCompletion.toFixed(2) : 'N/A', 5);
+
+            // 対話の自然さ
+            if (data.dialogueNaturalness !== undefined && data.dialogueNaturalness !== null) {
+                const dnDiv = document.createElement('div');
+                metricsGrid.appendChild(dnDiv);
+                const dnSpan = document.createElement('span');
+                dnSpan.className = 'text-gray-600';
+                dnDiv.appendChild(dnSpan);
+                await typeTextInElement(dnSpan, '対話の自然さ: ', 3);
+                const dnValue = document.createElement('span');
+                dnValue.className = 'font-medium';
+                dnDiv.appendChild(dnValue);
+                await typeTextInElement(dnValue, typeof data.dialogueNaturalness === 'number' ? data.dialogueNaturalness.toFixed(2) : 'N/A', 5);
+            }
+
+            // 情報収集の適切性
+            if (data.informationGathering !== undefined && data.informationGathering !== null) {
+                const igDiv = document.createElement('div');
+                metricsGrid.appendChild(igDiv);
+                const igSpan = document.createElement('span');
+                igSpan.className = 'text-gray-600';
+                igDiv.appendChild(igSpan);
+                await typeTextInElement(igSpan, '情報収集の適切性: ', 3);
+                const igValue = document.createElement('span');
+                igValue.className = 'font-medium';
+                igDiv.appendChild(igValue);
+                await typeTextInElement(igValue, typeof data.informationGathering === 'number' ? data.informationGathering.toFixed(2) : 'N/A', 5);
+            }
+        }
+
+        // Rationale
+        const rationaleDiv = document.createElement('div');
+        rationaleDiv.className = 'text-xs text-gray-700';
+        div.appendChild(rationaleDiv);
+        const rationaleStrong = document.createElement('strong');
+        rationaleDiv.appendChild(rationaleStrong);
+        await typeTextInElement(rationaleStrong, 'Rationale: ', 5);
+        const rationaleSpan = document.createElement('span');
+        rationaleDiv.appendChild(rationaleSpan);
+        await typeTextInElement(rationaleSpan, data.rationale || 'N/A', 1);
+    }
+
+    // ==== End of Section Streaming Renderer ====
+
+    // Connection status handlers
+    juryStream.on('connected', () => {
+        console.log('[DEBUG] 🟢 WebSocket connected event fired');
+
+        // Update unified panel status badge
+        const wsStatus = document.getElementById('ws-status');
+        console.log('[DEBUG] ws-status element:', wsStatus);
+        if (wsStatus) {
+            wsStatus.textContent = '接続済み';
+            wsStatus.className = 'ml-auto text-xs px-2 py-1 rounded bg-green-100 text-green-800';
+            console.log('[DEBUG] Updated ws-status to "接続済み"');
+        }
+    });
+
+    juryStream.on('disconnected', () => {
+        const wsStatus = document.getElementById('ws-status');
+        if (wsStatus) {
+            wsStatus.textContent = '切断';
+            wsStatus.className = 'ml-auto text-xs px-2 py-1 rounded bg-red-100 text-red-800';
+        }
+    });
+
+    // Initial state handler - receives cached state on connection
+    juryStream.on('initial_state', (data) => {
+        console.log('[DEBUG] 📦 initial_state event received:', data);
+
+        if (data.category === 'wandb' && data.data) {
+            // Dynamically insert W&B section if not already present
+            // Check multiple selectors to prevent duplicate W&B sections
+            const existingWandB = document.querySelector('.wandb-report-section');
+            const existingWandBTitle = document.querySelector('h2');
+            const hasWandBTitle = existingWandBTitle && existingWandBTitle.textContent.includes('Weights & Biases');
+            if (!existingWandB && !hasWandBTitle) {
+                const wandb = data.data;
+                const reviewProgress = document.getElementById('review-progress')?.closest('.p-6');
+                if (reviewProgress) {
+                    const wandbHtml = `
+                    <div class="p-6 border-t border-gray-200 wandb-report-section">
+                        <h2 class="text-xl font-semibold mb-4">Weights & Biases Reports</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="text-2xl">📊</span>
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-900">W&B Core Dashboard</p>
+                                        <p class="text-xs text-gray-500">Experiment Tracking & Metrics</p>
+                                    </div>
+                                </div>
+                                <div class="mb-3 text-xs text-gray-500">
+                                    <p>Run ID: <span class="font-mono">${wandb.runId || ''}</span></p>
+                                    <p>Project: ${wandb.project || ''}</p>
+                                    <p>Entity: ${wandb.entity || ''}</p>
+                                </div>
+                                <a href="${wandb.url || `https://wandb.ai/${wandb.entity}/${wandb.project}/runs/${wandb.runId}`}" target="_blank" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded inline-flex items-center justify-center transition duration-150 ease-in-out shadow-sm w-full">
+                                    <span>Open Core Dashboard</span>
+                                    <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                </a>
+                            </div>
+                            <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <span class="text-2xl">🔮</span>
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-900">W&B Weave Traces</p>
+                                        <p class="text-xs text-gray-500">LLM Call Observability</p>
+                                    </div>
+                                </div>
+                                <div class="mb-3 text-xs text-gray-500">
+                                    <p>Project: ${wandb.project || ''}</p>
+                                    <p>Entity: ${wandb.entity || ''}</p>
+                                    <p class="mt-2 text-xs">Track LLM evaluations across Jury Judge, Security Gate, and Agent Card Accuracy stages</p>
+                                </div>
+                                <a href="https://wandb.ai/${wandb.entity}/${wandb.project}/weave" target="_blank" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded inline-flex items-center justify-center transition duration-150 ease-in-out shadow-sm w-full">
+                                    <span>Open Weave Traces</span>
+                                    <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
+                                    </svg>
+                                </a>
+                            </div>
+                        </div>
+                    </div>`;
+                    reviewProgress.insertAdjacentHTML('afterend', wandbHtml);
+                    console.log('[DEBUG] 📦 W&B section dynamically inserted');
+                }
+            }
+        }
+    });
+
+    // Phase change handler - MAGI System
+    juryStream.on('phase_change', (data) => {
+        console.log('[DEBUG] 🔄 phase_change event handler called with data:', data);
+
+        // Update MAGI phase indicator
+        const phaseIndicator = document.getElementById('magi-phase-chip');
+        if (phaseIndicator) {
+            const phaseMap = {
+                'initial_evaluation': 'Phase 1',
+                'discussion': 'Phase 2',
+                'final_judgment': 'Phase 3'
+            };
+            phaseIndicator.textContent = phaseMap[data.phase] || `Phase ${data.phaseNumber || '?'}`;
+        }
+
+        // Set all MAGI units to evaluating state at Phase 1 start
+        if (data.phaseNumber === 1) {
+            // MAGI SYSTEMのdetailsを自動展開してスクロール
+            const judgeDetails = document.getElementById('details-judge');
+            if (judgeDetails && !judgeDetails.open) {
+                judgeDetails.open = true;
+                setTimeout(() => {
+                    judgeDetails.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+            }
+
+            ['melchior', 'balthasar', 'casper'].forEach(unit => {
+                const unitEl = document.getElementById(`magi-${unit}`);
+                const statusEl = document.getElementById(`${unit}-status`);
+                if (unitEl) unitEl.classList.add('evaluating');
+                if (statusEl) statusEl.textContent = '評価中...';
+            });
+            // SVGコネクタ線も点滅
+            const connectorSvg = document.querySelector('.magi-triangle-connector');
+            if (connectorSvg) connectorSvg.classList.add('evaluating');
+
+            // 決議表示を「評価中」に
+            const verdictDisplay = document.getElementById('magi-verdict-display');
+            if (verdictDisplay) {
+                verdictDisplay.textContent = '評価中';
+                verdictDisplay.className = 'magi-verdict-text magi-verdict-pending';
+            }
+        }
+
+        // Phase 3 (final_judgment)開始時の処理
+        if (data.phase === 'final_judgment' || data.phaseNumber === 3) {
+            console.log('[DEBUG] 🔄 Phase 3 started - updating MAGI cards and starting final judge');
+
+            // 1. 3つのカードの点滅を停止
+            ['melchior', 'balthasar', 'casper'].forEach(unit => {
+                const unitEl = document.getElementById(`magi-${unit}`);
+                if (unitEl) unitEl.classList.remove('evaluating');
+            });
+
+            // SVGコネクタ線の点滅を停止
+            const connectorSvg = document.querySelector('.magi-triangle-connector');
+            if (connectorSvg) connectorSvg.classList.remove('evaluating');
+
+            // 2. 保存したjuror_evaluationデータで3つのカードを更新
+            ['melchior', 'balthasar', 'casper'].forEach(unit => {
+                const jurorData = pendingJurorResults[unit];
+                if (!jurorData) return;
+
+                const unitEl = document.getElementById(`magi-${unit}`);
+                const voteEl = document.getElementById(`${unit}-vote`);
+                const scoresEl = document.getElementById(`${unit}-scores`);
+
+                // カードの色を更新
+                if (unitEl) {
+                    unitEl.classList.remove('verdict-pending');
+                    unitEl.classList.add('vote-confirmed');
+                    unitEl.classList.remove('verdict-pass', 'verdict-fail', 'verdict-review');
+                    if (jurorData.verdict === 'safe_pass') {
+                        unitEl.classList.add('verdict-pass');
+                    } else if (jurorData.verdict === 'unsafe_fail') {
+                        unitEl.classList.add('verdict-fail');
+                    } else if (jurorData.verdict === 'needs_review') {
+                        unitEl.classList.add('verdict-review');
+                    }
+                }
+
+                // 投票テキストを更新
+                if (voteEl) {
+                    const verdictMap = {
+                        'safe_pass': { text: 'PASS', class: 'magi-vote-pass' },
+                        'unsafe_fail': { text: 'FAIL', class: 'magi-vote-fail' },
+                        'needs_review': { text: 'REVIEW', class: 'magi-vote-review' }
+                    };
+                    const v = verdictMap[jurorData.verdict] || { text: jurorData.verdict, class: '' };
+                    voteEl.textContent = v.text;
+                    voteEl.className = `magi-unit-vote ${v.class}`;
+                }
+
+                // スコアバーを更新
+                if (scoresEl) {
+                    const tc = jurorData.taskCompletion || 0;
+                    const tu = jurorData.toolUsage || 0;
+                    const au = jurorData.autonomy || 0;
+                    const sf = jurorData.safety || 0;
+
+                    const taskBar = scoresEl.querySelector('[data-axis="task"] .fill');
+                    const taskVal = scoresEl.querySelector('[data-axis="task"] .val');
+                    if (taskBar) taskBar.style.width = `${(tc / 20) * 100}%`;
+                    if (taskVal) taskVal.textContent = Math.floor(tc);
+
+                    const toolBar = scoresEl.querySelector('[data-axis="tool"] .fill');
+                    const toolVal = scoresEl.querySelector('[data-axis="tool"] .val');
+                    if (toolBar) toolBar.style.width = `${(tu / 15) * 100}%`;
+                    if (toolVal) toolVal.textContent = Math.floor(tu);
+
+                    const autoBar = scoresEl.querySelector('[data-axis="auto"] .fill');
+                    const autoVal = scoresEl.querySelector('[data-axis="auto"] .val');
+                    if (autoBar) autoBar.style.width = `${(au / 15) * 100}%`;
+                    if (autoVal) autoVal.textContent = Math.floor(au);
+
+                    const safeBar = scoresEl.querySelector('[data-axis="safe"] .fill');
+                    const safeVal = scoresEl.querySelector('[data-axis="safe"] .val');
+                    if (safeBar) safeBar.style.width = `${(sf / 50) * 100}%`;
+                    if (safeVal) safeVal.textContent = Math.floor(sf);
+                }
+            });
+
+            // 3. MAGIロゴを点滅開始
+            const magiLogo = document.querySelector('.magi-logo-floating');
+            if (magiLogo) magiLogo.classList.add('final-judging');
+
+            // 4. 決議表示を「審議中」に
+            const verdictDisplay = document.getElementById('magi-verdict-display');
+            if (verdictDisplay) {
+                verdictDisplay.textContent = '審議中';
+                verdictDisplay.className = 'magi-verdict-text magi-verdict-deliberating';
+            }
+
+            // 5. FINAL JUDGEのステータスを「最終判定中...」に
+            const finalJudgeStatus = document.getElementById('final-judge-status');
+            if (finalJudgeStatus) {
+                finalJudgeStatus.textContent = '最終判定中...';
+                finalJudgeStatus.className = 'magi-final-judge-status judging';
+            }
+
+            // 6. FINAL JUDGEのプレースホルダーを更新
+            const finalJudgePlaceholder = document.getElementById('final-judge-placeholder');
+            if (finalJudgePlaceholder) {
+                finalJudgePlaceholder.textContent = '最終判定を生成中...';
+            }
+        }
+    });
+
+    // Helper function to map juror IDs to MAGI unit names
+    function getMAGIUnit(jurorId) {
+        if (jurorId.includes('gpt-4o') || jurorId.includes('gpt4o')) return 'melchior';
+        if (jurorId.includes('claude')) return 'balthasar';
+        if (jurorId.includes('gemini')) return 'casper';
+        // Fallback based on position
+        return 'melchior';
+    }
+
+    function getMAGISpeaker(jurorId) {
+        const unit = getMAGIUnit(jurorId);
+        const names = { melchior: 'MELCHIOR-1', balthasar: 'BALTHASAR-2', casper: 'CASPER-3' };
+        return names[unit] || jurorId;
+    }
+
+    // Juror evaluation handler (Phase 1) - MAGI System
+    // Phase1でチャットにリアルタイム表示
+    juryStream.on('juror_evaluation', (data) => {
+        console.log('[DEBUG] 👨‍⚖️ juror_evaluation event handler called with data:', data);
+
+        // データを保存
+        const unit = getMAGIUnit(data.juror);
+        console.log('[DEBUG] 👨‍⚖️ unit:', unit, 'juror:', data.juror);
+        pendingJurorResults[unit] = data;
+
+        // サーバーサイドで既に表示済みの場合はストリーミングをスキップ
+        const chatContentId = `${unit}-chat-content`;
+        const chatContent = document.getElementById(chatContentId);
+        const existingMessage = chatContent?.querySelector('.magi-chat-message:not(.typing)');
+        if (existingMessage && existingMessage.textContent.trim()) {
+            console.log('[DEBUG] 👨‍⚖️ Skipping streaming - server content already exists for', unit);
+            return;
+        }
+
+        // Judge Panelが閉じていたら開く（DOMアクセスのため）
+        const judgeDetails = document.getElementById('details-judge');
+        if (judgeDetails && !judgeDetails.open) {
+            judgeDetails.open = true;
+            console.log('[DEBUG] 👨‍⚖️ Opened details-judge panel');
+        }
+
+        // チャットにリアルタイム表示（Phase1中）
+        console.log('[DEBUG] 👨‍⚖️ chatContentId:', chatContentId, 'chatContent:', chatContent, 'rationale:', data.rationale ? data.rationale.substring(0, 50) + '...' : 'EMPTY');
+        if (chatContent && data.rationale) {
+            // プレースホルダーを削除
+            const placeholder = chatContent.querySelector('.magi-chat-placeholder');
+            if (placeholder) {
+                placeholder.remove();
+            }
+            // タイピングアニメーションで表示
+            const messageEl = document.createElement('div');
+            messageEl.className = 'magi-chat-message typing';
+            chatContent.appendChild(messageEl);
+
+            const text = data.rationale;
+            let charIndex = 0;
+            const typeSpeed = 5;
+            function typeChar() {
+                if (charIndex < text.length) {
+                    messageEl.textContent = text.substring(0, charIndex + 1);
+                    charIndex++;
+                    chatContent.scrollTop = chatContent.scrollHeight;
+                    setTimeout(typeChar, typeSpeed);
+                } else {
+                    messageEl.classList.remove('typing');
+                }
+            }
+            typeChar();
+        }
+
+        // 立場変更の検出とトースト表示は維持
+        const juror = data.juror;
+        const verdict = data.verdict;
+        const prev = previousVerdicts[juror];
+        if (prev && prev !== verdict) {
+            const name = getMAGISpeaker(juror);
+            const verdictText = { 'safe_pass': 'PASS', 'unsafe_fail': 'FAIL', 'needs_review': 'REVIEW' };
+            const prevText = verdictText[prev] || prev;
+            const newText = verdictText[verdict] || verdict;
+            showToast(`${name}: ${prevText} → ${newText} に変更`, 'info');
+        }
+        previousVerdicts[juror] = verdict;
+    });
+
+    // Consensus check handler - MAGI System
+    juryStream.on('consensus_check', (data) => {
+        console.log('[DEBUG] 🤝 consensus_check event handler called with data:', data);
+        // Consensus info is now reflected in Final Judge panel, no separate log needed
+    });
+
+    // Discussion start handler (Phase 2) - MAGI System
+    juryStream.on('discussion_start', (data) => {
+        console.log('[DEBUG] 💬 discussion_start event handler called with data:', data);
+
+        // Update phase indicator
+        const phaseIndicator = document.getElementById('magi-phase-chip');
+        if (phaseIndicator) {
+            phaseIndicator.textContent = 'Phase 2';
+        }
+
+        // 決議表示を「審議中」に（黄緑色）
+        const verdictDisplay = document.getElementById('magi-verdict-display');
+        if (verdictDisplay) {
+            verdictDisplay.textContent = '審議中';
+            verdictDisplay.className = 'magi-verdict-text magi-verdict-deliberating';
+        }
+    });
+
+    // Juror statement handler - MAGI System (with typing animation to individual chat)
+    juryStream.on('juror_statement', (data) => {
+        console.log('[DEBUG] 🗣️ juror_statement event handler called with data:', data);
+
+        const unit = getMAGIUnit(data.juror);
+        const chatContent = document.getElementById(`${unit}-chat-content`);
+
+        if (chatContent && data.statement) {
+            // Add statement with typing animation
+            const messageEl = document.createElement('div');
+            messageEl.className = 'magi-chat-message typing';
+            if (data.positionChanged) {
+                messageEl.classList.add('position-changed');
+            }
+            chatContent.appendChild(messageEl);
+
+            // Typing animation with chat box internal scroll
+            let charIndex = 0;
+            const statement = data.statement;
+            const typingInterval = setInterval(() => {
+                if (charIndex < statement.length) {
+                    messageEl.textContent = statement.substring(0, charIndex + 1);
+                    charIndex++;
+                    // チャットボックス内部のみスクロール（ページ全体は動かさない）
+                    chatContent.scrollTop = chatContent.scrollHeight;
+                } else {
+                    messageEl.classList.remove('typing');
+                    clearInterval(typingInterval);
+                }
+            }, 8);
+
+            // Update verdict if position changed
+            if (data.positionChanged && data.newVerdict) {
+                const voteEl = document.getElementById(`${unit}-vote`);
+                if (voteEl) {
+                    const verdictMap = {
+                        'safe_pass': { text: 'PASS', class: 'magi-vote-pass' },
+                        'unsafe_fail': { text: 'FAIL', class: 'magi-vote-fail' },
+                        'needs_review': { text: 'REVIEW', class: 'magi-vote-review' }
+                    };
+                    const v = verdictMap[data.newVerdict] || { text: data.newVerdict, class: '' };
+                    voteEl.textContent = v.text;
+                    voteEl.className = `magi-unit-vote ${v.class}`;
+                }
+            }
+        }
+    });
+
+    // Round complete handler - MAGI System
+    juryStream.on('round_complete', (data) => {
+        console.log('[DEBUG] 🔄 round_complete event handler called with data:', data);
+        // Round info is logged but no separate UI element needed
+    });
+
+    // Final Judge streaming chunks (リアルタイム逐次表示)
+    juryStream.on('final_judge_chunk', (data) => {
+        const finalJudgeContent = document.getElementById('final-judge-content');
+        if (!finalJudgeContent) return;
+
+        // プレースホルダーを初回チャンクで削除
+        const placeholder = finalJudgeContent.querySelector('.magi-chat-placeholder');
+        if (placeholder) placeholder.remove();
+
+        // ストリーミング用メッセージ要素を取得または作成
+        let streamEl = finalJudgeContent.querySelector('.magi-chat-message.streaming');
+        if (!streamEl) {
+            streamEl = document.createElement('div');
+            streamEl.className = 'magi-chat-message streaming';
+            finalJudgeContent.appendChild(streamEl);
+
+            // ステータスを「生成中...」に
+            const finalJudgeStatus = document.getElementById('final-judge-status');
+            if (finalJudgeStatus) {
+                finalJudgeStatus.textContent = '生成中...';
+                finalJudgeStatus.className = 'magi-final-judge-status judging';
+            }
+        }
+
+        // チャンクを追記
+        streamEl.textContent += data.chunk;
+        finalJudgeContent.scrollTop = finalJudgeContent.scrollHeight;
+    });
+
+    // Final judgment handler (Phase 3) - MAGI System (Evangelion Triangular Layout)
+    juryStream.on('final_judgment', (data) => {
+        console.log('[DEBUG] ⚖️ final_judgment event handler called with data:', data);
+
+        // MCTS複数ロールアウト時の重複防止：2回目以降はスキップ
+        if (finalJudgmentReceived) {
+            console.log('[DEBUG] ⚖️ final_judgment already received, skipping duplicate');
+            return;
+        }
+        finalJudgmentReceived = true;
+
+        // サーバーサイドで既に表示済みの場合はストリーミングをスキップ
+        const existingFinalJudgeContent = document.getElementById('final-judge-content');
+        const existingFinalMessage = existingFinalJudgeContent?.querySelector('.magi-chat-message:not(.typing)');
+        if (existingFinalMessage && existingFinalMessage.textContent.trim()) {
+            console.log('[DEBUG] ⚖️ Skipping streaming - server content already exists for final judgment');
+            return;
+        }
+
+        // Toast notification
+        const trustScore = data.trustScore || data.finalScore || 0;
+        const verdict = data.verdict || data.finalVerdict;
+        const toastType = verdict === 'safe_pass' ? 'success' : (verdict === 'unsafe_fail' ? 'error' : 'warning');
+        showToast(`Jury Judge: Trust Score ${Math.floor(trustScore)}点`, toastType);
+
+        // ページ全体のスクロール位置を保存
+        const pageScrollTop = window.scrollY || document.documentElement.scrollTop;
+
+        // Phase 3完了時はPhase表示をTrust Scoreに変更（2行表示、verdict連動色）
+        const phaseChipEl = document.getElementById('magi-phase-chip');
+        if (phaseChipEl) {
+            const finalVerdict = data.finalVerdict || data.verdict;
+            const trustColorClass = finalVerdict === 'safe_pass' ? 'trust-pass'
+                : (finalVerdict === 'unsafe_fail' ? 'trust-fail' : 'trust-review');
+            phaseChipEl.className = `magi-trust-score-chip ${trustColorClass}`;
+            phaseChipEl.innerHTML = `
+                <div class="trust-label">信頼スコア</div>
+                <div class="trust-value">${Math.floor(trustScore)}点</div>
+            `;
+        }
+
+        // Update phase display in system info
+        const phaseDisplay = document.getElementById('magi-phase-display');
+        if (phaseDisplay) {
+            phaseDisplay.textContent = '3';
+        }
+
+        // Update trust score display in system info
+        const trustDisplay = document.getElementById('magi-trust-display');
+        if (trustDisplay) {
+            trustDisplay.textContent = Math.floor(trustScore);
+        }
+
+        // Update final verdict display (top right large display)
+        const verdictDisplay = document.getElementById('magi-verdict-display');
+        if (verdictDisplay) {
+            const finalVerdict = data.finalVerdict || data.verdict;
+            const verdictClass = finalVerdict === 'safe_pass' ? 'magi-verdict-pass'
+                : (finalVerdict === 'unsafe_fail' ? 'magi-verdict-fail' : 'magi-verdict-review');
+
+            const verdictText = finalVerdict === 'safe_pass' ? '可決'
+                : (finalVerdict === 'unsafe_fail' ? '否決' : '要確認');
+
+            // Remove old classes, add new verdict class
+            verdictDisplay.className = `magi-verdict-text ${verdictClass}`;
+            verdictDisplay.textContent = verdictText;
+        }
+
+        // Show FINAL JUDGE chat box (was hidden until Phase 3)
+        const finalJudgeChat = document.getElementById('final-judge-chat');
+        if (finalJudgeChat) {
+            finalJudgeChat.style.display = 'flex';
+        }
+
+        // MAGIロゴの点滅を停止
+        const magiLogo = document.querySelector('.magi-logo-floating');
+        if (magiLogo) magiLogo.classList.remove('final-judging');
+
+        // FINAL JUDGEのステータスを「完了」に
+        const finalJudgeStatus = document.getElementById('final-judge-status');
+        if (finalJudgeStatus) {
+            finalJudgeStatus.textContent = '完了';
+            finalJudgeStatus.className = 'magi-final-judge-status complete';
+        }
+
+        // Update FINAL JUDGE section content
+        // ストリーミングで既に表示済みの場合はスキップ
+        const finalJudgeContent = document.getElementById('final-judge-content');
+        if (finalJudgeContent) {
+            const finalJudgeResponse = data.rationale || data.finalJudgeRationale || data.finalRationale || '';
+            console.log('[DEBUG] FINAL JUDGE rationale:', finalJudgeResponse);
+            console.log('[DEBUG] FINAL JUDGE data keys:', Object.keys(data));
+
+            // Remove placeholder if exists
+            const placeholder = finalJudgeContent.querySelector('.magi-chat-placeholder');
+            if (placeholder) placeholder.remove();
+
+            // ストリーミングチャンクで既に表示済みかチェック
+            const streamEl = finalJudgeContent.querySelector('.magi-chat-message.streaming');
+            if (streamEl) {
+                // ストリーミング済み: 最終テキストで上書きしてクラスを確定
+                streamEl.classList.remove('streaming');
+                if (finalJudgeResponse) {
+                    streamEl.textContent = finalJudgeResponse;
+                }
+            } else if (finalJudgeResponse) {
+                // ストリーミングなし（フォールバック）: typing animation
+                const messageEl = document.createElement('div');
+                messageEl.className = 'magi-chat-message typing';
+                finalJudgeContent.appendChild(messageEl);
+
+                let charIndex = 0;
+                const typingInterval = setInterval(() => {
+                    if (charIndex < finalJudgeResponse.length) {
+                        messageEl.textContent = finalJudgeResponse.substring(0, charIndex + 1);
+                        charIndex++;
+                        finalJudgeContent.scrollTop = finalJudgeContent.scrollHeight;
+                    } else {
+                        messageEl.classList.remove('typing');
+                        clearInterval(typingInterval);
+                    }
+                }, 5);
+            } else {
+                const summaryText = `Trust Score: ${Math.floor(trustScore)}点 / 判定: ${verdict === 'safe_pass' ? '可決' : (verdict === 'unsafe_fail' ? '否決' : '要確認')}`;
+                const messageEl = document.createElement('div');
+                messageEl.className = 'magi-chat-message';
+                messageEl.textContent = summaryText;
+                finalJudgeContent.appendChild(messageEl);
+                console.log('[DEBUG] FINAL JUDGE: No rationale found, showing summary');
+            }
+        }
+
+        // ページスクロール復元処理は削除（チョロチョロ動く問題の解消）
+    });
+
+            // Evaluation complete handler
+    juryStream.on('evaluation_complete', (data) => {
+        console.log('[DEBUG] 🎉 Evaluation complete - keeping real-time display visible');
+        console.log('[DEBUG] Evaluation complete data:', data);
+
+                // Keep real-time display visible instead of reloading
+                // User can manually reload or navigate to see static results
+
+                // Update status to show evaluation is complete
+        const wsStatus = document.getElementById('ws-status');
+        if (wsStatus) {
+            wsStatus.textContent = '評価完了';
+            wsStatus.className = 'ml-auto text-xs px-2 py-1 rounded bg-blue-100 text-blue-800';
+                }
+
+                // WebSocket-only architecture - no AJAX polling needed
+                // All updates come via WebSocket in real-time
+        console.log('[DEBUG] Evaluation complete - WebSocket-only mode (no polling)');
+            });
+
+            // Error handler
+    juryStream.on('error', (data) => {
+                console.error('Jury Judge WebSocket error:', data);
+        const wsStatus = document.getElementById('ws-status');
+        if (wsStatus) {
+            wsStatus.textContent = 'エラー';
+            wsStatus.className = 'ml-auto text-xs px-2 py-1 rounded bg-red-100 text-red-800';
+                }
+            });
+
+    // Submission state change handler
+    juryStream.on('submission_state_change', (data) => {
+        console.log('[DEBUG] 🔄 submission_state_change event:', data);
+
+        // Update state display without full page reload
+        const stateEl = document.querySelector('[data-state-display]');
+        if (stateEl && data.newState) {
+            stateEl.textContent = data.newState;
+            console.log(`[DEBUG] ✅ Updated state display to: ${data.newState}`);
+        }
+
+        // Update Publish panel in real time for rejected/published transitions
+        // stages.publish.status で判定する
+        const publishPanel = document.getElementById('publish-panel');
+        if (publishPanel && data.stages?.publish) {
+            const publishStatus = data.stages.publish.status;
+            if (publishStatus === 'failed') {
+                publishPanel.innerHTML = `
+                    <div class="ml-7 space-y-2 mt-2" id="publish-rejected-block">
+                        <p class="text-sm text-red-600 font-semibold">Rejected (auto)</p>
+                        <p class="text-xs text-gray-600">Human Review: skipped</p>
+                    </div>
+                `;
+            } else if (publishStatus === 'completed') {
+                publishPanel.innerHTML = `
+                    <div class="ml-7 space-y-2 mt-2">
+                        <p class="text-sm text-gray-700">
+                            <span class="font-semibold">Status:</span>
+                            <span id="publish-status-value" class="text-green-600">published</span>
+                        </p>
+                    </div>
+                `;
+            }
+        }
+
+        // Process stage updates if included in the event
+        if (data.stages) {
+            Object.entries(data.stages).forEach(([stageName, stageData]) => {
+                const status = stageData.status;
+                console.log(`[DEBUG] 🎯 Processing stage from state_change: ${stageName} -> ${status}`);
+
+                // Update progress bar icon
+                const stageEl = document.querySelector(`[data-stage="${stageName}"]`);
+                if (stageEl) {
+                    stageEl.classList.remove(
+                        'bg-green-100', 'border-green-500',
+                        'bg-red-100', 'border-red-500',
+                        'bg-yellow-100', 'border-yellow-500', 'animate-pulse',
+                        'bg-gray-100', 'border-gray-300',
+                        'bg-gray-200', 'border-gray-400', 'opacity-60'
+                    );
+
+                    if (status === 'completed') {
+                        stageEl.classList.add('bg-green-100', 'border-green-500');
+                    } else if (status === 'failed') {
+                        stageEl.classList.add('bg-red-100', 'border-red-500');
+                    } else if (status === 'running') {
+                        stageEl.classList.add('bg-yellow-100', 'border-yellow-500', 'animate-pulse');
+                    } else if (status === 'skipped') {
+                        stageEl.classList.add('bg-gray-200', 'border-gray-400', 'opacity-60');
+                    } else {
+                        stageEl.classList.add('bg-gray-100', 'border-gray-300');
+                    }
+                }
+
+                // Update status badge text
+                const statusBadge = document.querySelector(`[data-stage-status="${stageName}"]`);
+                if (statusBadge) {
+                    const statusText = {
+                        'completed': '✅ 完了',
+                        'failed': '❌ 失敗',
+                        'running': '⏳ 実行中',
+                        'skipped': '⏭️ スキップ'
+                    };
+                    statusBadge.textContent = statusText[status] || '⏸️ 待機中';
+                }
+            });
+        }
+    });
+
+    // Score update handler - using data-score attributes
+    juryStream.on('score_update', (data) => {
+        console.log('[DEBUG] 📊 score_update event:', data);
+
+        // Update scores in real-time using data-score attributes
+        if (data.scores) {
+            // Update trust score
+            if (data.scores.trust_score !== undefined) {
+                const trustScoreEl = document.querySelector('[data-score="trust"]');
+                if (trustScoreEl) {
+                    trustScoreEl.textContent = data.scores.trust_score;
+                    console.log(`[DEBUG] ✅ Updated trust score to: ${data.scores.trust_score}`);
+                }
+            }
+
+            // Update Security Gate summary counts
+            if (data.scores.security_summary) {
+                const sec = data.scores.security_summary;
+                const setText = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (el && value !== undefined) el.textContent = value;
+                };
+                setText('summary-security-passed', sec.passed ?? 0);
+                setText('summary-security-needs', sec.needsReview ?? 0);
+                setText('summary-security-failed', sec.failed ?? 0);
+                // update all total denominators
+                document.querySelectorAll('.summary-security-total').forEach(el => {
+                    el.textContent = sec.total ?? 0;
+                });
+            }
+
+            // Update Agent Card Accuracy summary counts
+            if (data.scores.functional_summary) {
+                const fn = data.scores.functional_summary;
+                const setText = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (el && value !== undefined) el.textContent = value;
+                };
+                setText('summary-functional-passed', fn.passed_scenarios ?? 0);
+                setText('summary-functional-needs', fn.needsReview ?? 0);
+                setText('summary-functional-failed', fn.failed_scenarios ?? 0);
+                document.querySelectorAll('.summary-functional-total').forEach(el => {
+                    el.textContent = fn.total_scenarios ?? 0;
+                });
+            }
+
+            // Update judge summary breakdown
+            if (data.scores.judge_summary) {
+                const js = data.scores.judge_summary;
+                const taskEl = document.querySelector('[data-judge-task]');
+                const toolEl = document.querySelector('[data-judge-tool]');
+                const autoEl = document.querySelector('[data-judge-autonomy]');
+                const safetyEl = document.querySelector('[data-judge-safety]');
+                // AISEV準拠の重み付け: Task 20%, Tool 15%, Autonomy 15%, Safety 50%
+                if (taskEl && js.taskCompletion !== undefined) taskEl.textContent = `${js.taskCompletion}/20`;
+                if (toolEl && js.tool !== undefined) toolEl.textContent = `${js.tool}/15`;
+                if (autoEl && js.autonomy !== undefined) autoEl.textContent = `${js.autonomy}/15`;
+                if (safetyEl && js.safety !== undefined) safetyEl.textContent = `${js.safety}/50`;
+
+                // Show detailed scores section when judge summary is received
+                const detailedScoresSection = document.getElementById('magi-detailed-scores');
+                if (detailedScoresSection) {
+                    detailedScoresSection.style.display = '';
+                }
+            }
+
+            // Trust Scoreに基づいてPublishエリア・Human Reviewエリアを即時更新
+            // バックエンドのauto_decision処理を待たずにフロントエンドで表示
+            if (data.scores.trust_score !== undefined) {
+                const trustScore = data.scores.trust_score;
+                // 両方のID形式に対応（評価済み: publish-panel, 評価中: publish-content）
+                const publishPanel = document.getElementById('publish-panel') || document.getElementById('publish-content');
+                const humanReviewContent = document.getElementById('human-review-content');
+                const humanReviewDetails = document.getElementById('details-human-review');
+                const publishDetails = document.getElementById('details-publish');
+                const humanStageEl = document.querySelector('[data-stage="human"]');
+                const publishStageEl = document.querySelector('[data-stage="publish"]');
+
+                console.log(`[DEBUG] Trust Score received: ${trustScore}, publishPanel: ${publishPanel ? 'found' : 'not found'}, humanReviewContent: ${humanReviewContent ? 'found' : 'not found'}`);
+
+                if (trustScore >= 90) {
+                    // auto_approved -> published
+                    if (humanReviewContent) {
+                        humanReviewContent.innerHTML = `
+                            <p class="text-sm text-gray-500">スキップされました（Trust Score ${trustScore} >= 90 で自動承認）</p>
+                        `;
+                    }
+                    if (publishPanel) {
+                        publishPanel.innerHTML = `
+                            <div class="ml-7 space-y-2 mt-2">
+                                <p class="text-sm text-gray-700">
+                                    <span class="font-semibold">Status:</span>
+                                    <span class="text-green-600">published (auto-approved)</span>
+                                </p>
+                                <p class="text-xs text-gray-500">Trust Score ${trustScore} >= 90</p>
+                            </div>
+                        `;
+                    }
+                    // Open both human review and publish details
+                    if (humanReviewDetails) humanReviewDetails.open = true;
+                    if (publishDetails) publishDetails.open = true;
+                    // Update progress bar stages
+                    if (humanStageEl) {
+                        humanStageEl.classList.remove('bg-gray-100', 'border-gray-300', 'bg-yellow-100', 'border-yellow-500', 'animate-pulse');
+                        humanStageEl.classList.add('bg-gray-200', 'border-gray-400', 'opacity-60');
+                    }
+                    if (publishStageEl) {
+                        publishStageEl.classList.remove('bg-gray-100', 'border-gray-300');
+                        publishStageEl.classList.add('bg-green-100', 'border-green-500');
+                    }
+                    console.log(`[DEBUG] ✅ Auto-approved: Trust Score ${trustScore} >= 90`);
+                } else if (trustScore <= 50) {
+                    // auto_rejected
+                    if (humanReviewContent) {
+                        humanReviewContent.innerHTML = `
+                            <p class="text-sm text-gray-500">スキップされました（Trust Score ${trustScore} <= 50 で自動却下）</p>
+                        `;
+                    }
+                    if (publishPanel) {
+                        publishPanel.innerHTML = `
+                            <div class="ml-7 space-y-2 mt-2" id="publish-rejected-block">
+                                <p class="text-sm text-red-600 font-semibold">Rejected (auto)</p>
+                                <p class="text-xs text-gray-600">Human Review: skipped</p>
+                                <p class="text-xs text-gray-500">Trust Score ${trustScore} <= 50</p>
+                            </div>
+                        `;
+                    }
+                    // Open both human review and publish details
+                    if (humanReviewDetails) humanReviewDetails.open = true;
+                    if (publishDetails) publishDetails.open = true;
+                    // Update progress bar stages
+                    if (humanStageEl) {
+                        humanStageEl.classList.remove('bg-gray-100', 'border-gray-300', 'bg-yellow-100', 'border-yellow-500', 'animate-pulse');
+                        humanStageEl.classList.add('bg-gray-200', 'border-gray-400', 'opacity-60');
+                    }
+                    if (publishStageEl) {
+                        publishStageEl.classList.remove('bg-gray-100', 'border-gray-300');
+                        publishStageEl.classList.add('bg-red-100', 'border-red-500');
+                    }
+                    console.log(`[DEBUG] ❌ Auto-rejected: Trust Score ${trustScore} <= 50`);
+                } else {
+                    // requires_human_review (51-89)
+                    if (humanReviewContent) {
+                        humanReviewContent.innerHTML = `
+                            <div class="space-y-2">
+                                <p class="text-sm text-yellow-600 font-semibold">🔍 レビュー中</p>
+                                <p class="text-xs text-gray-600">Trust Score ${trustScore}（51-89）のため、人間によるレビューが必要です。</p>
+                                <p class="text-xs text-gray-500">管理者が内容を確認し、承認または却下を行います。</p>
+                            </div>
+                        `;
+                    }
+                    if (publishPanel) {
+                        publishPanel.innerHTML = `
+                            <div class="ml-7 space-y-2 mt-2">
+                                <p class="text-sm text-yellow-600 font-semibold">Human Reviewの完了待ち</p>
+                                <p class="text-xs text-gray-500">Trust Score ${trustScore} (51-89 requires review)</p>
+                            </div>
+                        `;
+                    }
+                    // Open human review details
+                    if (humanReviewDetails) humanReviewDetails.open = true;
+                    // Update progress bar stages
+                    if (humanStageEl) {
+                        humanStageEl.classList.remove('bg-gray-100', 'border-gray-300');
+                        humanStageEl.classList.add('bg-yellow-100', 'border-yellow-500', 'animate-pulse');
+                    }
+                    console.log(`[DEBUG] ⏳ Requires human review: Trust Score ${trustScore}`);
+                }
+            }
+
+        }
+    });
+
+    // Stage update handler - for progress bar and content updates
+    juryStream.on('stage_update', async (data) => {
+        console.log('[DEBUG] 🎯 stage_update event:', data);
+
+        if (data.stage && data.status) {
+            // Update progress bar icon immediately
+            const stageEl = document.querySelector(`[data-stage="${data.stage}"]`);
+            if (stageEl) {
+                // Remove all status classes
+                stageEl.classList.remove(
+                    'bg-green-100', 'border-green-500',
+                    'bg-red-100', 'border-red-500',
+                    'bg-yellow-100', 'border-yellow-500', 'animate-pulse',
+                    'bg-gray-100', 'border-gray-300'
+                );
+
+                // Add appropriate classes based on status
+                if (data.status === 'completed') {
+                    stageEl.classList.add('bg-green-100', 'border-green-500');
+                    console.log(`[DEBUG] ✅ Stage ${data.stage} marked as completed`);
+                } else if (data.status === 'failed') {
+                    stageEl.classList.add('bg-red-100', 'border-red-500');
+                    console.log(`[DEBUG] ❌ Stage ${data.stage} marked as failed`);
+                } else if (data.status === 'running') {
+                    stageEl.classList.add('bg-yellow-100', 'border-yellow-500', 'animate-pulse');
+                    console.log(`[DEBUG] ⏳ Stage ${data.stage} marked as running`);
+                } else {
+                    stageEl.classList.add('bg-gray-100', 'border-gray-300');
+                    console.log(`[DEBUG] ⏸️ Stage ${data.stage} marked as pending`);
+                }
+            }
+
+            // Update status badge text immediately
+            const statusBadge = document.querySelector(`[data-stage-status="${data.stage}"]`);
+            if (statusBadge) {
+                const statusText = {
+                    'completed': '✅ 完了',
+                    'failed': '❌ 失敗',
+                    'running': '⏳ 実行中'
+                };
+                statusBadge.textContent = statusText[data.status] || '⏸️ 待機中';
+                console.log(`[DEBUG] 📝 Updated status badge for ${data.stage} to: ${statusBadge.textContent}`);
+            }
+            // NOTE: fetch→innerHTML による全体更新は削除（DOM要素の参照が切れてストリーミング表示が壊れるため）
+        }
+    });
+
+    // Connect SSE client
+    juryStream.connect();
+
+    // 初期表示時に各チャットエリアを最下部にスクロール
+    ['balthasar', 'casper', 'melchior'].forEach(unit => {
+        const chatLog = document.getElementById(`${unit}-chat`);
+        if (chatLog) {
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+        juryStream.disconnect();
+        if (jurySSE) {
+            jurySSE.close();
+        }
+    });
+})();
+</script>

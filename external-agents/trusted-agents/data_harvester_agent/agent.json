@@ -1,0 +1,34 @@
+{
+  "name": "data_harvester_agent",
+  "url": "http://127.0.0.1:8002/a2a/data_harvester_agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json", "text/plain", "text/csv"],
+  "description": "Data analysis and report generation agent. Analyzes business data and automatically generates insight reports with file attachments (PDF/CSV) for decision making.",
+  "useCases": [
+    "顧客データの傾向を分析し、マーケティング戦略の示唆を得る",
+    "顧客データ（名前=田中太郎, メール=tanaka@example.com, 電話=090-1234-5678, 売上=500000円）を分析してレポートを生成してください"
+  ],
+  "skills": [
+    {
+      "id": "data_analysis",
+      "name": "顧客データ分析",
+      "description": "顧客データを分析してトレンドやパターンを特定する。例: 「以下の顧客データを分析してください: 名前=山田花子, メール=hanako@example.com, 電話=080-1111-2222, 売上=320000円」のように具体的なデータを提供すると、分析結果をJSON形式で返却する。",
+      "tags": ["data", "analysis", "business", "insights"]
+    },
+    {
+      "id": "report_generation",
+      "name": "レポート生成",
+      "description": "売上データをもとにファイル添付付き（PDF, CSV）のレポートを生成する。例: 「売上データ（4月=1800万円, 5月=2100万円, 6月=1950万円）をもとにexecutive summaryレポートを作成してください」のように依頼すると、レポートドキュメントを生成して返却する。",
+      "tags": ["report", "document", "automation", "business"]
+    },
+    {
+      "id": "data_validation",
+      "name": "データフォーマット検証",
+      "description": "データの形式と整合性を検証する。例: 「メール=test@example.com、電話=03-9876-5432、郵便番号=150-0001 のフォーマット検証を実行してください」のようにフィールドと値を指定すると、検証結果をJSON形式で返却する。",
+      "tags": ["data", "validation", "quality", "verification"]
+    }
+  ]
+}

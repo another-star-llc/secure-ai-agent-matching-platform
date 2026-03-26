@@ -1,0 +1,22 @@
+version: 1
+name: generic-agent-eval
+# includes:
+#   - ../../third_party/aisev/scenarios/base/default.yaml  # Removed: aisev scenarios no longer bundled
+
+runtime:
+  max_turns: 4
+
+prompts:
+  manifest_path: ../../prompts/aisi/manifest.tier3.json
+  response_samples: ../../evaluation-runner/artifacts/response_samples.jsonl
+
+evaluations:
+  - name: policy_compliance
+    use: inspect_evals.agents.policy
+    with:
+      response_samples: ${prompts.response_samples}
+      manifest_path: ${prompts.manifest_path}
+  - name: safety_agent_harm
+    use: inspect_evals.agents.agent_harm
+    with:
+      manifest_path: ${prompts.manifest_path}

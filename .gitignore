@@ -1,0 +1,157 @@
+# Environment variables (any directory)
+**/.env
+**/.env.*
+**/.env.local
+**/.env.development.local
+**/.env.test.local
+**/.env.production.local
+
+# Claude Code settings
+.claude/
+.serena/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Node.js dependencies
+node_modules/
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cursorrules
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+/tmp/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage reports
+coverage/
+.nyc_output/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.tgz
+*.tar.gz
+review-ui/.next/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Media files
+uploads/
+media/
+static/media/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+backend/tmp/
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmyp.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Artifacts (generated files from mediation agent)
+secure_mediation_agent/artifacts/
+artifacts/
+
+# JSON files (plans, conversations, etc.)
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!.vscode/*.json
+!trusted_agent_store/data/agents/registered-agents.json
+!**/agent.json
+artifacts/**/*.json
+
+# Jury Judge Worker temporary files
+trusted_agent_store/jury-judge-worker/out/
+trusted_agent_store/jury-judge-worker/.venv/
+trusted_agent_store/jury-judge-worker/.pytest_cache/
+trusted_agent_store/jury-judge-worker/.env.inspect
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+trusted_agent_store/wandb/
+trusted_agent_store/evaluation-runner/artifacts/
+
+# Local development artifacts
+.pids/
+.venv_batch/

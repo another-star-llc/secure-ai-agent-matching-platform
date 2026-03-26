@@ -1,0 +1,42 @@
+{
+  "name": "secure_mediator",
+  "description": "Secure mediation agent that safely matches and orchestrates AI agents from the platform, protecting against prompt injection and hallucination attacks through multi-layer anomaly detection.",
+  "url": "http://localhost:8001",
+  "version": "1.0.0",
+  "protocolVersion": "0.3",
+  "capabilities": {
+    "secure_matching": true,
+    "plan_execution": true,
+    "anomaly_detection": true,
+    "trust_scoring": true
+  },
+  "skills": [
+    {
+      "id": "agent_matching",
+      "name": "Agent Matching with Trust Scoring",
+      "description": "Search and match appropriate agents from the platform based on client requirements with trust score evaluation",
+      "tags": ["matching", "trust", "security", "a2a"]
+    },
+    {
+      "id": "execution_planning",
+      "name": "Execution Planning",
+      "description": "Create step-by-step execution plans using matched agents and save as markdown artifacts",
+      "tags": ["planning", "orchestration", "artifacts"]
+    },
+    {
+      "id": "secure_orchestration",
+      "name": "Secure Orchestration",
+      "description": "Execute plans while monitoring for anomalies, plan deviations, and security threats in real-time",
+      "tags": ["orchestration", "security", "monitoring"]
+    },
+    {
+      "id": "anomaly_detection",
+      "name": "Multi-layer Anomaly Detection",
+      "description": "Detect prompt injection, hallucination chains, and plan deviations during and after execution",
+      "tags": ["security", "anomaly-detection", "prompt-injection", "hallucination"]
+    }
+  ],
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json", "text/markdown"],
+  "supportsAuthenticatedExtendedCard": false
+}

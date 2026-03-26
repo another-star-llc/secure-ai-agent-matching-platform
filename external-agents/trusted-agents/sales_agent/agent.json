@@ -1,0 +1,44 @@
+{
+  "name": "sales_agent",
+  "url": "http://127.0.0.1:8002/a2a/sales_agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json", "text/plain", "text/plain; charset=utf-8"],
+  "description": "営業支援エージェント。CRM AI（顧客分析）と契約AI（契約書ドラフト生成）機能を統合。顧客データ検索、提案書作成、見積書作成、契約書ドラフト生成を自動化します。",
+  "skills": [
+    {
+      "id": "customer_search",
+      "name": "Customer Search",
+      "description": "CRM AI: 顧客データを検索・分析。過去の取引履歴、顧客ランク、連絡先情報を取得",
+      "tags": ["sales", "crm", "customer", "analysis"]
+    },
+    {
+      "id": "proposal_generation",
+      "name": "Proposal Generation",
+      "description": "営業AI: 提案書テンプレートを生成。ソリューション概要、導入メリット、スケジュールを含む",
+      "tags": ["sales", "proposal", "document", "automation"]
+    },
+    {
+      "id": "quote_creation",
+      "name": "Quote Creation",
+      "description": "営業AI: 見積書を作成。品目、数量、割引、税金を自動計算",
+      "tags": ["sales", "quote", "pricing", "estimation"]
+    },
+    {
+      "id": "contract_drafting",
+      "name": "Contract Drafting",
+      "description": "契約AI: 契約書ドラフトを生成。契約条件、支払条件、署名欄を含む（人間による最終確認が必要）",
+      "tags": ["sales", "contract", "legal", "document"]
+    }
+  ]
+  ,
+  "useCases": [
+    "株式会社ABCの顧客情報を検索してください",
+    "株式会社ABCに対してクラウドサービス「CloudConnect」の提案書を作成したい",
+    "株式会社ABC向けにCloudConnect（ライセンス費用=100万円×1式、導入支援=50万円×1式、保守サポート=20万円×1式）の見積書を作成してください",
+    "株式会社ABCとのクラウドサービス利用契約書（契約期間: 1年間）のドラフトを作成してください",
+    "新規リード「株式会社未来テック」のCRM情報を検索し、AIデータ分析サービスの提案書を作成してください"
+  ]
+}

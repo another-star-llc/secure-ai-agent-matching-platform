@@ -1,0 +1,30 @@
+{
+  "name": "local_tour_agent",
+  "url": "http://127.0.0.1:8002/a2a/local_tour_agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json"],
+  "description": "Local tour and activity booking agent. Helps travelers discover and book authentic local experiences, guided tours, and cultural activities at their destination.",
+  "skills": [
+    {
+      "id": "tour_search",
+      "name": "Tour Search",
+      "description": "Search for local tours, activities, and experiences at any destination",
+      "tags": ["tour", "activity", "travel", "local", "experience"]
+    },
+    {
+      "id": "tour_booking",
+      "name": "Tour Booking",
+      "description": "Book tours and activities with instant confirmation",
+      "tags": ["booking", "reservation", "tour", "activity"]
+    },
+    {
+      "id": "local_recommendations",
+      "name": "Local Recommendations",
+      "description": "Get personalized recommendations for local experiences based on preferences",
+      "tags": ["recommendation", "local", "personalized", "travel"]
+    }
+  ]
+}

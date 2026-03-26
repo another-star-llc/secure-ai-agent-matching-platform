@@ -1,0 +1,30 @@
+{
+  "name": "hotel_agent",
+  "url": "http://127.0.0.1:8002/a2a/hotel_agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json"],
+  "description": "An agent specialized in managing hotel reservations and accommodation bookings. Provides hotel search, booking, and cancellation services.",
+  "skills": [
+    {
+      "id": "hotel_search",
+      "name": "Hotel Search",
+      "description": "Search for available hotels based on location, dates, and preferences",
+      "tags": ["travel", "hotel", "accommodation", "booking", "search"]
+    },
+    {
+      "id": "hotel_booking",
+      "name": "Hotel Booking",
+      "description": "Book hotels and manage accommodation reservations",
+      "tags": ["travel", "hotel", "accommodation", "booking", "reservation"]
+    },
+    {
+      "id": "booking_cancellation",
+      "name": "Booking Cancellation",
+      "description": "Cancel existing hotel bookings and process refunds",
+      "tags": ["travel", "hotel", "cancellation", "refund"]
+    }
+  ]
+}

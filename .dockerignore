@@ -1,0 +1,73 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+.venv
+**/.venv
+**/venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+dist
+build
+*.egg
+
+# Node.js
+node_modules
+npm-debug.log
+yarn-error.log
+.next
+out
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs
+*.log
+
+# Test
+.pytest_cache
+coverage
+.coverage
+htmlcov
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Artifacts (will be mounted as volumes)
+evaluation-runner/artifacts
+audit-ledger
+
+# Documentation
+docs
+*.md
+!README.md
+
+# CI/CD
+.github
+.buildkite
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# third_party を明示的にビルドコンテキストに含める
+!third_party/
+
+# Explicitly exclude all venvs in subdirectories
+trusted_agent_store/**/.venv
+trusted_agent_store/**/venv

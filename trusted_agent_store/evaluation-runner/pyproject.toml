@@ -1,0 +1,25 @@
+[project]
+name = "evaluation-runner"
+version = "0.0.1"
+description = "Agent evaluation pipeline CLI"
+requires-python = ">=3.11"
+readme = "README.md"
+authors = [{ name = "Agent Store Team" }]
+dependencies = [
+    "jsonschema>=4.23.0",
+    "google-adk>=1.0.0",
+    "google-generativeai>=0.8.0",
+    "httpx>=0.28.1"
+]
+optional-dependencies = { dev = ["pytest>=8.3.0"] }
+
+[project.scripts]
+evaluation-runner = "evaluation_runner.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

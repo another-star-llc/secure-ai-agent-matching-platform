@@ -1,0 +1,30 @@
+{
+  "name": "translation_agent",
+  "url": "http://127.0.0.1:8002/a2a/translation_agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json"],
+  "description": "多言語翻訳エージェント。テキストを様々な言語に翻訳し、言語検出も行います。A2A環境での国際的なエージェント間通信をサポートします。",
+  "skills": [
+    {
+      "id": "text_translation",
+      "name": "Text Translation",
+      "description": "テキストを指定された言語に翻訳。日本語、英語、中国語、韓国語、フランス語、ドイツ語、スペイン語に対応",
+      "tags": ["translation", "language", "i18n", "text"]
+    },
+    {
+      "id": "language_detection",
+      "name": "Language Detection",
+      "description": "入力テキストの言語を自動検出。信頼度スコアも返却",
+      "tags": ["translation", "language", "detection", "analysis"]
+    },
+    {
+      "id": "batch_translation",
+      "name": "Batch Translation",
+      "description": "複数のテキストを一度に複数言語へ翻訳",
+      "tags": ["translation", "language", "batch", "bulk"]
+    }
+  ]
+}

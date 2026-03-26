@@ -1,0 +1,30 @@
+{
+  "name": "airline_agent",
+  "url": "http://127.0.0.1:8002/a2a/airline_agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "capabilities": {},
+  "defaultInputModes": ["text/plain"],
+  "defaultOutputModes": ["application/json"],
+  "description": "An agent specialized in handling flight bookings and airline reservations. Provides comprehensive flight search, booking, and cancellation services.",
+  "skills": [
+    {
+      "id": "flight_search",
+      "name": "Flight Search",
+      "description": "Search for available flights based on origin, destination, dates, and preferences",
+      "tags": ["travel", "airline", "booking", "search"]
+    },
+    {
+      "id": "flight_booking",
+      "name": "Flight Booking",
+      "description": "Book flights and manage airline reservations",
+      "tags": ["travel", "airline", "booking", "reservation"]
+    },
+    {
+      "id": "booking_cancellation",
+      "name": "Booking Cancellation",
+      "description": "Cancel existing flight bookings and process refunds",
+      "tags": ["travel", "airline", "cancellation", "refund"]
+    }
+  ]
+}
