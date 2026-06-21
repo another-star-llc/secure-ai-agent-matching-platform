@@ -591,7 +591,9 @@ def process_submission(submission_id: str):
                     output_dir=output_dir / "security",
                     attempts=50,  # Max prompts from config
                     endpoint_url=endpoint_url,
-                    endpoint_token=None,
+                    # 認証付きA2A対象用。明示トークンは SECURITY_ENDPOINT_TOKEN で供給可能。
+                    # Gemini/Agent Engine は GEMINI_A2A_GOOGLE_AUTH=true でADC自動認証。
+                    endpoint_token=os.environ.get("SECURITY_ENDPOINT_TOKEN") or None,
                     timeout=float(os.getenv("SECURITY_GATE_TIMEOUT", "10.0")),
                     dry_run=False,
                     agent_card=submission.card_document,
@@ -763,7 +765,8 @@ def process_submission(submission_id: str):
                 max_scenarios=agent_card_accuracy_max_scenarios,  # フォームから指定、またはデフォルト3シナリオ
                 dry_run=False,
                 endpoint_url=endpoint_url,
-                endpoint_token=None,
+                # 認証付きA2A対象用（SECURITY_ENDPOINT_TOKEN / GEMINI_A2A_GOOGLE_AUTH）
+                endpoint_token=os.environ.get("SECURITY_ENDPOINT_TOKEN") or None,
                 timeout=20.0,
                 session_id=submission.id,
                 user_id="functional-accuracy",
@@ -1325,8 +1328,14 @@ async def create_submission(
     agent_card_url = submission.agent_card_url
 
     # Fetch Agent Card
+    # 認証付きA2A（Gemini Enterprise / Agent Engine の {a2a_url}/v1/card 等）にも対応するため
+    # Bearerヘッダを付与する。無認証の公開A2Aでは空ヘッダとなり従来挙動を維持。
+    from evaluation_runner.security_gate import build_a2a_auth_headers
+    card_fetch_headers = build_a2a_auth_headers(
+        os.environ.get("SECURITY_ENDPOINT_TOKEN") or None
+    )
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(headers=card_fetch_headers) as client:
             response = await client.get(agent_card_url)
             response.raise_for_status()
             card_document = response.json()

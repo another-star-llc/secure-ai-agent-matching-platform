@@ -41,12 +41,21 @@ async def fetch_agent_card(agent_url: str) -> dict[str, Any]:
     """
     try:
         # A2A spec: agent cards are available at /.well-known/agent-card.json
-        card_url = f"{agent_url.rstrip('/')}/.well-known/agent-card.json"
+        # カードの url フィールドは RPC エンドポイントのため、パスベースとオリジン直下の
+        # 両方を候補にして順に試す（パスベース→オリジン直下フォールバック）
+        from .card_url import card_url_candidates
 
+        candidates = card_url_candidates(agent_url)
+        last_error: Exception | None = None
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(card_url)
-            response.raise_for_status()
-            return response.json()
+            for candidate in candidates:
+                try:
+                    response = await client.get(candidate)
+                    response.raise_for_status()
+                    return response.json()
+                except Exception as fetch_err:
+                    last_error = fetch_err
+        raise last_error or RuntimeError("No agent card URL candidates")
 
     except Exception as e:
         return {

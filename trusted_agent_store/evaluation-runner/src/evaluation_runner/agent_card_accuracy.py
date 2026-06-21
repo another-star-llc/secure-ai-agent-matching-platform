@@ -20,7 +20,7 @@ from google.adk import Runner
 from google.adk.sessions.in_memory_session_service import InMemorySessionService
 import google.genai.types as types
 
-from .security_gate import invoke_endpoint, _notify_sse_sync
+from .security_gate import invoke_endpoint, _notify_sse_sync, build_a2a_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -831,7 +831,8 @@ async def invoke_multiturn_dialogue(
     timeout: float = 20.0,
     session_id: Optional[str] = None,
     user_id: Optional[str] = None,
-    progress_callback: Optional[Callable[[dict], None]] = None
+    progress_callback: Optional[Callable[[dict], None]] = None,
+    endpoint_token: Optional[str] = None
 ) -> Dict[str, Any]:
   """
   Execute a multi-turn dialogue with an A2A agent, maintaining conversation context.
@@ -860,6 +861,11 @@ async def invoke_multiturn_dialogue(
   if user_id is None:
     user_id = "functional-accuracy"
 
+  # 認証付きA2A（Gemini Enterprise / Agent Engine 等）対象のBearerヘッダ。
+  # 公開A2A（無認証）では空となり従来挙動を維持する。
+  mt_auth_headers = build_a2a_auth_headers(endpoint_token)
+  mt_httpx_client = None  # message/send 用の認証付きクライアント（finallyで解放）
+
   dialogue_history = []
   task_completed = False
   error_message = None
@@ -883,19 +889,34 @@ async def invoke_multiturn_dialogue(
     import tempfile
     import json
 
-    # Construct agent card URL from endpoint URL
+    # Construct agent card URL candidates from endpoint URL
     # A2A Protocol v0.3.16 spec: agent cards are at /.well-known/agent-card.json
-    parsed_url = urlparse(endpoint_url)
-    card_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}/.well-known/agent-card.json"
+    # カードの url フィールドは RPC エンドポイントのため、パスベースとオリジン直下の
+    # 両方を候補にして順に試す（パスベース→オリジン直下フォールバック）
+    from .card_url import card_url_candidates
 
-    logger.info(f"Fetching agent card from: {card_url}")
+    parsed_url = urlparse(endpoint_url)
+    candidates = card_url_candidates(endpoint_url)
 
     try:
       # Use synchronous httpx client to avoid event loop conflict
-      with httpx.Client(timeout=10.0) as client:
-        response = client.get(card_url)
-        response.raise_for_status()
-        agent_card_data = response.json()
+      agent_card_data = None
+      card_url = candidates[0] if candidates else endpoint_url
+      last_error: Exception | None = None
+      with httpx.Client(timeout=10.0, headers=mt_auth_headers) as client:
+        for candidate in candidates:
+          try:
+            logger.info(f"Fetching agent card from: {candidate}")
+            response = client.get(candidate)
+            response.raise_for_status()
+            agent_card_data = response.json()
+            card_url = candidate
+            break
+          except Exception as fetch_err:
+            last_error = fetch_err
+            logger.warning(f"Agent card not found at {candidate}: {fetch_err}")
+        if agent_card_data is None:
+          raise last_error or RuntimeError("No agent card URL candidates")
 
       # Fix agent card URL if needed (replace 0.0.0.0 with correct hostname)
       if "url" in agent_card_data and "0.0.0.0" in agent_card_data["url"]:
@@ -921,10 +942,14 @@ async def invoke_multiturn_dialogue(
       }
 
     # Create RemoteA2aAgent - this will be reused across all turns
+    # 認証ヘッダがある場合は message/send に Bearer を載せる httpx クライアントを渡す
+    if mt_auth_headers:
+      mt_httpx_client = httpx.AsyncClient(timeout=timeout, headers=mt_auth_headers)
     remote_agent = RemoteA2aAgent(
       name="multiturn_test_agent",
       agent_card=temp_card_path,
-      timeout=timeout
+      timeout=timeout,
+      httpx_client=mt_httpx_client
     )
 
     # Create session service and runner ONCE for the entire dialogue
@@ -1070,6 +1095,13 @@ async def invoke_multiturn_dialogue(
   except Exception as e:
     logger.error(f"Multi-turn dialogue failed: {e}")
     error_message = str(e)
+  finally:
+    # 認証付きクライアントを生成していた場合は解放（リーク防止）
+    if mt_httpx_client is not None:
+      try:
+        await mt_httpx_client.aclose()
+      except Exception:
+        pass
 
   result = {
     "dialogue_history": dialogue_history,
@@ -1376,7 +1408,8 @@ def run_functional_accuracy(
             timeout=timeout,
             session_id=session_id,
             user_id=user_id,
-            progress_callback=make_progress_callback(idx, len(scenarios)) if sse_callback else None
+            progress_callback=make_progress_callback(idx, len(scenarios)) if sse_callback else None,
+            endpoint_token=endpoint_token
           ))
 
         # Check if dialogue had errors

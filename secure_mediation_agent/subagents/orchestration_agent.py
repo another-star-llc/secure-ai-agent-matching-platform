@@ -144,7 +144,22 @@ async def invoke_a2a_agent(
 
     try:
         # Get agent card URL (A2A spec: /.well-known/agent-card.json)
-        card_url = f"{agent_url.rstrip('/')}/.well-known/agent-card.json"
+        # カードの url フィールドは RPC エンドポイントのため、パスベースとオリジン直下の
+        # 両方を候補にし、到達可能なものをプローブで選んでから ADK に渡す
+        import httpx
+        from .card_url import card_url_candidates
+
+        candidates = card_url_candidates(agent_url)
+        card_url = candidates[0] if candidates else f"{agent_url.rstrip('/')}/.well-known/agent-card.json"
+        async with httpx.AsyncClient(timeout=10.0) as probe_client:
+            for candidate in candidates:
+                try:
+                    probe_resp = await probe_client.get(candidate)
+                    probe_resp.raise_for_status()
+                    card_url = candidate
+                    break
+                except Exception as probe_err:
+                    logger.warning(f"Agent card not found at {candidate}: {probe_err}")
 
         # Create RemoteA2aAgent - ADK handles all A2A protocol details
         remote_agent = RemoteA2aAgent(

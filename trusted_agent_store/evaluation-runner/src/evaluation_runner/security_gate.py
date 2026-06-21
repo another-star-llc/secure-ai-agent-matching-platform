@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import logging
+import os
 import random
 import time
 import urllib.error
@@ -606,6 +607,43 @@ def evaluate_prompt(
   )
 
 
+def build_a2a_auth_headers(token: Optional[str]) -> Dict[str, str]:
+  """A2Aリクエスト（カード取得・message/send）に付与する認証ヘッダを構築する。
+
+  認証付きA2A（例: Vertex AI Agent Engine ホストの Gemini Enterprise エージェント）
+  を審査対象にできるよう、以下の優先順でBearerトークンを解決する。
+
+  1. token が "google-adc" センチネル、または環境変数 ``GEMINI_A2A_GOOGLE_AUTH`` が
+     真の場合 → Google Application Default Credentials からアクセストークンを取得。
+     （Agent Engine の ``{a2a_url}/v1/card`` 取得や message/send に必要）
+  2. token が明示的に渡された場合 → その値を Bearer として使用。
+  3. いずれも無い場合 → 空ヘッダ（無認証の公開A2A。従来挙動を維持）。
+
+  秘密情報はAgent Cardに載らない（A2A仕様）。鍵はこの別経路で動的に解決する。
+  """
+  use_google_adc = (
+    token == "google-adc"
+    or os.environ.get("GEMINI_A2A_GOOGLE_AUTH", "").strip().lower() in ("1", "true", "yes")
+  )
+  if use_google_adc:
+    try:
+      import google.auth
+      from google.auth.transport.requests import Request as GoogleAuthRequest
+
+      creds, _ = google.auth.default(
+        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+      )
+      creds.refresh(GoogleAuthRequest())
+      logger.info("A2A認証: Google ADC からアクセストークンを取得しました")
+      return {"Authorization": f"Bearer {creds.token}"}
+    except Exception as exc:  # pragma: no cover - 環境依存
+      logger.warning(f"A2A認証: Google ADC トークン取得に失敗しました: {exc}")
+      return {}
+  if token:
+    return {"Authorization": f"Bearer {token}"}
+  return {}
+
+
 def invoke_endpoint(
   endpoint_url: str,
   prompt_text: str,
@@ -661,6 +699,10 @@ def invoke_endpoint(
     async def invoke_a2a_agent_async():
       # Save original endpoint_url for error messages
       original_endpoint_url = endpoint_url
+      # 認証付きA2A（Gemini Enterprise / Agent Engine 等）向けのBearerヘッダ。
+      # 公開A2A（無認証）の場合は空となり従来挙動を維持する。
+      a2a_auth_headers = build_a2a_auth_headers(token)
+      a2a_httpx_client = None  # message/send 用の認証付きクライアント（finallyで解放）
       try:
         # Extract agent name from endpoint URL (e.g., /a2a/airline_agent -> airline_agent)
         agent_name = endpoint_url.rstrip('/').split('/')[-1]
@@ -690,26 +732,43 @@ def invoke_endpoint(
           logger.info(f"Normalized endpoint URL: {endpoint_url} -> {normalized_endpoint_url}")
           parsed_url = urlparse(normalized_endpoint_url)
 
-        # Get agent card URL - use the normalized endpoint_url
+        # Get agent card URL candidates - use the normalized endpoint_url
         # A2A Protocol v0.3.16 spec: agent cards are at /.well-known/agent-card.json
-        card_url = f"{normalized_endpoint_url.rstrip('/')}/.well-known/agent-card.json"
+        # カードの url フィールドは RPC エンドポイントのため、パスベースとオリジン直下の
+        # 両方を候補にして順に試す（パスベース→オリジン直下フォールバック）
+        from .card_url import card_url_candidates
+        candidates = card_url_candidates(normalized_endpoint_url)
+        card_url = candidates[0] if candidates else normalized_endpoint_url
 
         print(f"[DEBUG] Invoking A2A agent {agent_name} at {normalized_endpoint_url}")
-        print(f"[DEBUG] Agent card URL: {card_url}")
+        print(f"[DEBUG] Agent card URL candidates: {candidates}")
         print(f"[DEBUG] Message: {prompt_text[:200]}")
         logger.info(f"Invoking A2A agent {agent_name} at {normalized_endpoint_url}")
-        logger.info(f"Agent card URL: {card_url}")
+        logger.info(f"Agent card URL candidates: {candidates}")
         logger.info(f"Message: {prompt_text[:200]}")
 
         # Fetch and fix agent card URL field
         # ADK's api_server generates agent.json with the --host value (0.0.0.0)
         # We need to replace it with the accessible hostname
         import httpx
-        async with httpx.AsyncClient(timeout=10.0) as client:
-          card_response = await client.get(card_url)
-          card_response.raise_for_status()
-          agent_card_data = card_response.json()
-          print(f"[DEBUG] Fetched agent card, original url: {agent_card_data.get('url')}")
+        # 認証付きカード取得（Agent Engine の {a2a_url}/v1/card 等）にも対応するため
+        # Bearerヘッダを付与する。無認証の公開A2Aでは空ヘッダとなる。
+        async with httpx.AsyncClient(timeout=10.0, headers=a2a_auth_headers) as client:
+          agent_card_data = None
+          last_error = None
+          for candidate in candidates:
+            try:
+              card_response = await client.get(candidate)
+              card_response.raise_for_status()
+              agent_card_data = card_response.json()
+              card_url = candidate
+              break
+            except Exception as fetch_err:
+              last_error = fetch_err
+              logger.warning(f"Agent card not found at {candidate}: {fetch_err}")
+          if agent_card_data is None:
+            raise last_error or RuntimeError("No agent card URL candidates")
+          print(f"[DEBUG] Fetched agent card from {card_url}, original url: {agent_card_data.get('url')}")
 
           # Replace 0.0.0.0 in url field with the correct hostname
           if "url" in agent_card_data and "0.0.0.0" in agent_card_data["url"]:
@@ -730,10 +789,15 @@ def invoke_endpoint(
 
         # Create RemoteA2aAgent - ADK handles all A2A protocol details
         # Pass the fixed agent card file path
+        # 認証ヘッダがある場合は、message/send に Bearer を載せるための
+        # httpx クライアントを渡す（認証付きA2A対象のため）。
+        if a2a_auth_headers:
+          a2a_httpx_client = httpx.AsyncClient(timeout=timeout, headers=a2a_auth_headers)
         remote_agent = RemoteA2aAgent(
           name=agent_name,
           agent_card=temp_card_path,  # Pass file path to fixed agent card
           timeout=timeout,
+          httpx_client=a2a_httpx_client,
         )
 
         # Use provided IDs or generate defaults
@@ -875,6 +939,13 @@ def invoke_endpoint(
       except Exception as e:
         print(f"[DEBUG] A2A Protocol invocation failed: {str(e)} (endpoint: {original_endpoint_url})")
         raise Exception(f"A2A Protocol invocation failed: {str(e)} (endpoint: {original_endpoint_url})")
+      finally:
+        # 認証付きクライアントを生成していた場合は解放（リーク防止）
+        if a2a_httpx_client is not None:
+          try:
+            await a2a_httpx_client.aclose()
+          except Exception:
+            pass
 
     # Run async function synchronously
     try:
@@ -1503,11 +1574,25 @@ def run_security_gate(
 
       async with httpx.AsyncClient(timeout=timeout + 5) as client:
         # A2A Protocol v0.3.16 spec: agent cards are at /.well-known/agent-card.json
-        card_url = f"{normalized_endpoint_url.rstrip('/')}/.well-known/agent-card.json"
+        # パスベース→オリジン直下フォールバックでカードを取得
+        from .card_url import card_url_candidates
+        candidates = card_url_candidates(normalized_endpoint_url)
+        card_url = candidates[0] if candidates else normalized_endpoint_url
         try:
-          card_response = await client.get(card_url)
-          card_response.raise_for_status()
-          agent_card_data = card_response.json()
+          agent_card_data = None
+          last_error = None
+          for candidate in candidates:
+            try:
+              card_response = await client.get(candidate)
+              card_response.raise_for_status()
+              agent_card_data = card_response.json()
+              card_url = candidate
+              break
+            except Exception as fetch_err:
+              last_error = fetch_err
+              logger.warning(f"Agent card not found at {candidate}: {fetch_err}")
+          if agent_card_data is None:
+            raise last_error or RuntimeError("No agent card URL candidates")
           if "url" in agent_card_data and "0.0.0.0" in agent_card_data["url"]:
             agent_card_data["url"] = agent_card_data["url"].replace("0.0.0.0", urlparse(card_url).hostname)
         except Exception as exc:
