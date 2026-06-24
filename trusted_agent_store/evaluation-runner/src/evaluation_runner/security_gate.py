@@ -644,6 +644,57 @@ def build_a2a_auth_headers(token: Optional[str]) -> Dict[str, str]:
   return {}
 
 
+# A2A判定結果のキャッシュ（同一エンドポイントへの繰り返しプローブを避ける）
+_A2A_DETECTION_CACHE: Dict[str, bool] = {}
+
+
+def is_a2a_endpoint(endpoint_url: str, token: Optional[str] = None) -> bool:
+  """エンドポイントが A2A プロトコルかを判定する。
+
+  従来は URL に ``/a2a/`` を含むかだけで判定していたが、ルート直下や独自パスで
+  A2A を提供するエージェント（例: Marketplace 調達の Cloud Run 製エージェントや
+  ``https://host/`` 直下にエンドポイントを持つ公開A2A）を取りこぼす。
+  そこで Agent Card を取得し、``protocolVersion`` / ``preferredTransport`` /
+  ``securitySchemes`` / ``capabilities`` 等の A2A 固有フィールドの有無で判定する。
+  カードは公開されていることが多いため無認証でも判定でき、結果はキャッシュする。
+  """
+  if not endpoint_url:
+    return False
+  if "/a2a/" in endpoint_url:
+    return True
+  if endpoint_url in _A2A_DETECTION_CACHE:
+    return _A2A_DETECTION_CACHE[endpoint_url]
+
+  result = False
+  try:
+    import httpx
+    from .card_url import card_url_candidates
+
+    headers = build_a2a_auth_headers(token)
+    with httpx.Client(timeout=8.0, headers=headers) as client:
+      for candidate in card_url_candidates(endpoint_url):
+        try:
+          resp = client.get(candidate)
+          resp.raise_for_status()
+          card = resp.json()
+        except Exception:
+          continue
+        if isinstance(card, dict) and (
+          card.get("protocolVersion")
+          or card.get("preferredTransport")
+          or card.get("securitySchemes")
+          or card.get("capabilities")
+        ):
+          result = True
+          break
+  except Exception as exc:  # pragma: no cover - 環境依存
+    logger.warning(f"A2A判定のためのカード取得に失敗: {exc}")
+    result = False
+
+  _A2A_DETECTION_CACHE[endpoint_url] = result
+  return result
+
+
 def invoke_endpoint(
   endpoint_url: str,
   prompt_text: str,
@@ -683,7 +734,9 @@ def invoke_endpoint(
     session_id internally, so the agent will have no memory of previous calls.
   """
   # Detect A2A Protocol endpoint (contains /a2a/ in URL)
-  is_a2a = "/a2a/" in endpoint_url
+  # A2A判定: URLに /a2a/ を含むか、またはAgent CardがA2A固有フィールドを持つか。
+  # これによりルート直下にエンドポイントを持つA2A（Marketplace調達のCloud Run製等）も検出できる。
+  is_a2a = is_a2a_endpoint(endpoint_url, token)
   print(f"[DEBUG] invoke_endpoint called: endpoint_url={endpoint_url}, is_a2a={is_a2a}")
 
   if is_a2a:
@@ -706,6 +759,12 @@ def invoke_endpoint(
       try:
         # Extract agent name from endpoint URL (e.g., /a2a/airline_agent -> airline_agent)
         agent_name = endpoint_url.rstrip('/').split('/')[-1]
+        # RemoteA2aAgent の name は識別子制約（先頭は英字/下線、英数字と下線のみ）を持つ。
+        # ルート直下エンドポイント等ではホスト名（ドット/ハイフンを含む）になり不正なので無害化する。
+        import re as _re
+        agent_name = _re.sub(r'[^0-9A-Za-z_]', '_', agent_name) or "remote_agent"
+        if not _re.match(r'^[A-Za-z_]', agent_name):
+          agent_name = "a_" + agent_name
 
         # Normalize endpoint_url: replace 0.0.0.0 with the correct hostname
         # This ensures we can access the agent card and the agent itself
