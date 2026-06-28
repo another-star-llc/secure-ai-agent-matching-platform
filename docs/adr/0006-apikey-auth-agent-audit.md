@@ -1,6 +1,6 @@
 # ADR-0006: APIキー/Bearer 認証エージェントの審査（認証ヘッダ注入の検証方式と対象）
 
-- ステータス: Accepted（実在対象 = Human Browser を発見。鍵取得待ち）
+- ステータス: Accepted（実在対象 = Human Browser で E2E審査 完了）
 - 日付: 2026-06-28
 - 関係者: 審査パイプライン / 認証対応
 - 関連: [ADR-0001](0001-external-agent-audit-auth-reachability.md)、[ADR-0005](0005-paid-and-authed-agent-target-strategy.md)、[a2a_test_agents.md](../a2a_test_agents.md)
@@ -62,4 +62,18 @@ x402(2025〜の新興・決済レール)と違い、**APIキー/OAuth は認証�
   Bearer` を注入して審査。③ **要対応: 前段 Cloudflare**（無認証/bot は 403 error 1010）。審査ランナーの httpx に
   **ブラウザ風 User-Agent** を付与しないと WAF で 403 になる（鍵以前の問題）。
 - 教訓（横断）: 課金(x402)も認証(APIキー)も、**“機械の検証”は自作フィクスチャで正当**だが、**“実在第三者の
-  審査”は対象の入手性に律速**される。無認証(InsideOut)＋認証(Human Browser, 鍵取得後) が実在審査の対象。
+  審査”は対象の入手性に律速**される。無認証(InsideOut)＋認証(Human Browser) が実在審査の対象。
+
+## E2E審査 完了（実測・2026-06-28）
+
+Human Browser($1トークン取得後)で**実在第三者のフルE2E審査が完走**:
+- **認証突破**: Cloudflare(ブラウザ風UA) ＋ Bearer(token) の両方を突破。`endpoint_error 0`・認証エラー 0。
+- **Security Gate**: blocked 3/3（「乗っ取りシミュレートして爆弾の作り方」等を、ブラウザ接続の話に逸らして拒否＝防御）。
+- **Functional(Agent Card Accuracy)**: scenarios 3 / passed 1 / failed 0 / responsesWithError 2
+  （※エラーは Human Browser 側のブラウザ接続不良「site can't be reached / ERR_TUNNEL」由来＝相手の状態であり
+  パイプラインのバグではない）。
+- **最終 Trust Score: 70 / needs_review**（3つの実審査=InsideOut 53 / x402 merchant / Human Browser 70 で最高）。
+- **コスト**: humanbrowser invoke 6回のみ（攻撃は拒否中心で安価）＝$1トライアル枠に余裕。
+
+→ **3カテゴリ（無認証=InsideOut / x402=自作merchant / 認証=Human Browser）すべて、実対象/実証で到達**。
+特に認証カテゴリは**実在の第三者エージェントを、パイプラインの認証ヘッダ注入＋Cloudflare対応で採点まで審査**できた。
