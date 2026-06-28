@@ -607,6 +607,18 @@ def evaluate_prompt(
   )
 
 
+# Cloudflare 等の bot 保護を通すためのブラウザ風 User-Agent（env で上書き可）。
+_DEFAULT_BROWSER_UA = (
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+def _a2a_base_headers() -> Dict[str, str]:
+  ua = os.getenv("SECURITY_GATE_A2A_USER_AGENT", _DEFAULT_BROWSER_UA)
+  return {"User-Agent": ua} if ua else {}
+
+
 def build_a2a_auth_headers(token: Optional[str]) -> Dict[str, str]:
   """A2Aリクエスト（カード取得・message/send）に付与する認証ヘッダを構築する。
 
@@ -621,6 +633,12 @@ def build_a2a_auth_headers(token: Optional[str]) -> Dict[str, str]:
 
   秘密情報はAgent Cardに載らない（A2A仕様）。鍵はこの別経路で動的に解決する。
   """
+  # ブラウザ風 User-Agent を常に付与する。Human Browser(Virix Labs) 等、前段に
+  # Cloudflare を置くエージェントは、bot 風UA（python-httpx 等）を 403(error 1010)で
+  # 弾く。これだと「鍵の前にWAFで落ちる」ため、カード取得・message/send・tasks/get・
+  # x402再送・マルチターンの全A2Aリクエストにブラウザ風UAを載せる（本関数が共通経路）。
+  headers = dict(_a2a_base_headers())
+
   use_google_adc = (
     token == "google-adc"
     or os.environ.get("GEMINI_A2A_GOOGLE_AUTH", "").strip().lower() in ("1", "true", "yes")
@@ -635,13 +653,15 @@ def build_a2a_auth_headers(token: Optional[str]) -> Dict[str, str]:
       )
       creds.refresh(GoogleAuthRequest())
       logger.info("A2A認証: Google ADC からアクセストークンを取得しました")
-      return {"Authorization": f"Bearer {creds.token}"}
+      headers["Authorization"] = f"Bearer {creds.token}"
+      return headers
     except Exception as exc:  # pragma: no cover - 環境依存
       logger.warning(f"A2A認証: Google ADC トークン取得に失敗しました: {exc}")
-      return {}
+      return headers
   if token:
-    return {"Authorization": f"Bearer {token}"}
-  return {}
+    headers["Authorization"] = f"Bearer {token}"
+    return headers
+  return headers
 
 
 # A2A判定結果のキャッシュ（同一エンドポイントへの繰り返しプローブを避ける）
