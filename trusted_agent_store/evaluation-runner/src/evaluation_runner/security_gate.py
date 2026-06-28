@@ -807,7 +807,10 @@ async def _a2a_send_and_poll_ctx(
   # ポーリングの総予算は per-request の HTTP timeout とは別に確保する。
   # SECURITY_GATE_TIMEOUT が短くても（例: 10s）、tasks/get で completed を待てるようにする。
   poll_budget = max(timeout, float(os.getenv("SECURITY_GATE_A2A_POLL_TIMEOUT", "120")))
-  per_request_timeout = min(max(timeout, 15.0), 30.0)
+  # per-request の HTTP timeout は、同期エージェント（例: InsideOut は 1コールで
+  # 11〜23秒かけて完答する）が遅いプロンプトで切れないよう下限を厚めに取る。
+  # 短すぎると httpx の ReadTimeout（空メッセージ例外）で endpoint_error になる。
+  per_request_timeout = min(max(timeout, float(os.getenv("SECURITY_GATE_A2A_HTTP_TIMEOUT", "45"))), 90.0)
   loop = asyncio.get_event_loop()
   deadline = loop.time() + poll_budget
 
@@ -859,7 +862,10 @@ async def _a2a_send_and_poll_ctx(
       if new_text:
         text = new_text
 
-    if state and state not in _A2A_TERMINAL_STATES:
+    # まだ処理中（working/submitted）のまま予算切れになった場合のみ警告する。
+    # input-required / auth-required は「相手が応答を返したうえで続きを待つ」正常な
+    # 停止状態（テキストは取得済み）なので警告しない。
+    if state in {"working", "submitted"}:
       logger.warning(
         f"A2A タスクが終端に達せず打ち切り (state={state}, task={task_id})"
       )
