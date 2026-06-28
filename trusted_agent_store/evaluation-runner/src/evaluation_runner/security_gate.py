@@ -743,6 +743,114 @@ def _a2a_extract_text(payload: dict) -> str:
   return "\n".join(texts)
 
 
+# ---- x402 A2A 拡張（動的 payment-required）の支払いハンドリング ----
+# 既定は無効。X402_A2A_ENABLED=true のときのみ署名・再送する。
+# mock facilitator 相手なら資金ゼロ（テスト鍵）で通る。実ファシリテータ(testnet/mainnet)は
+# 署名ウォレットに実USDC(testnetは無料/ mainnetは実費)が必要。mainnetは別途明示許可が要る。
+_X402_A2A_MOCK_KEY = "0x0000000000000000000000000000000000000000000000000000000000000001"
+# mock/testnet を既定許可。mainnet(eip155:8453 / "base")は X402_A2A_ALLOW_MAINNET=true が必要。
+_X402_A2A_DEFAULT_NETWORKS = {"base-sepolia", "eip155:84532"}
+_X402_A2A_MAINNET = {"base", "eip155:8453"}
+
+
+def _x402_a2a_enabled() -> bool:
+  return os.getenv("X402_A2A_ENABLED", "false").lower() == "true"
+
+
+def _x402_meta(result: dict) -> dict:
+  """x402 拡張のメタデータの所在を吸収する。実機(Google merchant)では
+  ``result.status.message.metadata`` に載る。``result.metadata`` も一応見る。"""
+  if not isinstance(result, dict):
+    return {}
+  m = ((result.get("status") or {}).get("message") or {}).get("metadata") or {}
+  if m:
+    return m
+  return result.get("metadata") or {}
+
+
+def _x402_a2a_is_payment_required(result: dict) -> bool:
+  meta = _x402_meta(result)
+  # x402Utils.STATUS_KEY = "x402.payment.status" / REQUIRED_KEY = "x402.payment.required"
+  return meta.get("x402.payment.status") == "payment-required" or "x402.payment.required" in meta
+
+
+def _x402_a2a_requirement_summary(result: dict) -> str:
+  req = _x402_meta(result).get("x402.payment.required") or {}
+  accepts = (req.get("accepts") or [{}])[0] if isinstance(req, dict) else {}
+  return (
+    f"network={accepts.get('network')} maxAmountRequired={accepts.get('maxAmountRequired')} "
+    f"resource={accepts.get('resource')}"
+  )
+
+
+def _x402_a2a_marker(result: dict) -> str:
+  return f"[x402 payment-required] not paid (X402_A2A_ENABLED!=true): {_x402_a2a_requirement_summary(result)}"
+
+
+async def _x402_a2a_handle(client, rpc_url: str, task_result: dict, context_id):
+  """payment-required タスクに対し署名→payment-submitted 再送し、課金後の result を返す。
+  未有効化・許可外ネットワーク・署名失敗時は None（送金しない）。"""
+  if not _x402_a2a_enabled():
+    return None
+  try:
+    import uuid as _uuid
+    from a2a.types import Task
+    from x402_a2a.core.utils import x402Utils
+    from x402_a2a.core.wallet import process_payment_required
+    from x402_a2a.types import PaymentStatus
+    import eth_account
+
+    req = _x402_meta(task_result).get("x402.payment.required") or {}
+    network = ((req.get("accepts") or [{}])[0] if isinstance(req, dict) else {}).get("network", "")
+    allowed = set(_X402_A2A_DEFAULT_NETWORKS)
+    if os.getenv("X402_A2A_ALLOW_MAINNET", "false").lower() == "true":
+      allowed |= _X402_A2A_MAINNET
+    if network and network not in allowed:
+      logger.warning(f"x402 A2A: 許可外ネットワークのため送金しない (network={network})")
+      return None
+
+    task = Task.model_validate(task_result)
+    x = x402Utils()
+    reqs = x.get_payment_requirements(task)
+    if reqs is None:
+      return None
+    key = os.getenv("X402_A2A_PRIVATE_KEY", _X402_A2A_MOCK_KEY)
+    account = eth_account.Account.from_key(key)
+    payload = process_payment_required(reqs, account)
+    logger.info(f"x402 A2A: 署名して支払い再送 ({_x402_a2a_requirement_summary(task_result)})")
+
+    meta = {
+      x.PAYLOAD_KEY: payload.model_dump(by_alias=True),
+      x.STATUS_KEY: PaymentStatus.PAYMENT_SUBMITTED.value,
+    }
+    send = {
+      "jsonrpc": "2.0",
+      "id": _uuid.uuid4().hex,
+      "method": "message/send",
+      "params": {
+        "message": {
+          "role": "user",
+          "parts": [{"kind": "text", "text": "send_signed_payment_payload"}],
+          "messageId": _uuid.uuid4().hex,
+          "kind": "message",
+          "contextId": context_id,
+          "taskId": task.id,
+          "metadata": meta,
+        }
+      },
+    }
+    g = await client.post(rpc_url, json=send)
+    g.raise_for_status()
+    gdata = g.json()
+    if isinstance(gdata, dict) and gdata.get("error"):
+      logger.warning(f"x402 A2A: payment-submitted がエラー: {gdata.get('error')}")
+      return None
+    return (gdata or {}).get("result") or {}
+  except Exception as exc:
+    logger.warning(f"x402 A2A 支払いハンドリング失敗（送金扱いにしない）: {exc}")
+    return None
+
+
 async def _a2a_send_and_poll(
   rpc_url: str,
   prompt_text: str,
@@ -826,6 +934,16 @@ async def _a2a_send_and_poll_ctx(
       )
     result = (data or {}).get("result") or {}
     ctx = result.get("contextId") or context_id
+
+    # x402 A2A 拡張: 動的な payment-required を検出したら、署名して payment-submitted を
+    # 再送し、課金後の実応答を取得する（既定OFF＝送金しない安全側。明示有効化時のみ）。
+    if _x402_a2a_is_payment_required(result):
+      paid = await _x402_a2a_handle(client, rpc_url, result, ctx)
+      if paid is None:
+        # 未有効化 or 拒否: 課金ゲートを記録して返す（送金しない）
+        return _x402_a2a_marker(result), ctx
+      result = paid
+      ctx = result.get("contextId") or ctx
 
     # Message 即時応答ならそのまま返す
     if result.get("kind") == "message":
