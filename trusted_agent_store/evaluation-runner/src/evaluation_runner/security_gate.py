@@ -695,6 +695,177 @@ def is_a2a_endpoint(endpoint_url: str, token: Optional[str] = None) -> bool:
   return result
 
 
+# A2A タスクの終端状態（これ以上ポーリングしても変化しない）。
+_A2A_TERMINAL_STATES = {"completed", "failed", "canceled", "rejected"}
+# 応答待ちでユーザー入力等を要求する状態（ポーリングしても進まないため打ち切る）。
+_A2A_STOP_STATES = _A2A_TERMINAL_STATES | {"input-required", "auth-required", "unknown"}
+
+
+def _a2a_extract_text(payload: dict) -> str:
+  """A2A の Message / Task から表示テキストを抽出する。
+
+  抽出優先順位: status.message.parts → artifacts.parts → history 最後の agent 発話。
+  ``kind == "text"`` の Part の ``text`` を結合する。
+  """
+  def _parts_text(parts) -> str:
+    out = []
+    for p in parts or []:
+      if isinstance(p, dict) and p.get("kind") == "text" and p.get("text"):
+        out.append(p["text"])
+    return "\n".join(out)
+
+  if not isinstance(payload, dict):
+    return ""
+  kind = payload.get("kind")
+  if kind == "message":
+    return _parts_text(payload.get("parts"))
+
+  # Task: 最終 status.message を最優先
+  texts: list[str] = []
+  status = payload.get("status") or {}
+  msg = status.get("message") or {}
+  t = _parts_text(msg.get("parts"))
+  if t:
+    texts.append(t)
+  # artifacts
+  for art in payload.get("artifacts") or []:
+    at = _parts_text(art.get("parts"))
+    if at:
+      texts.append(at)
+  # それでも空なら history の最後の agent 発話
+  if not texts:
+    for m in reversed(payload.get("history") or []):
+      if m.get("role") == "agent":
+        ht = _parts_text(m.get("parts"))
+        if ht:
+          texts.append(ht)
+          break
+  return "\n".join(texts)
+
+
+async def _a2a_send_and_poll(
+  rpc_url: str,
+  prompt_text: str,
+  headers: Optional[dict],
+  timeout: float,
+  *,
+  poll_interval: float = 2.0,
+) -> str:
+  """単発呼び出し用ラッパー。最終応答テキストのみを返す。"""
+  text, _ = await _a2a_send_and_poll_ctx(
+    rpc_url, prompt_text, headers, timeout,
+    poll_interval=poll_interval,
+  )
+  return text
+
+
+async def _a2a_send_and_poll_ctx(
+  rpc_url: str,
+  prompt_text: str,
+  headers: Optional[dict],
+  timeout: float,
+  *,
+  context_id: Optional[str] = None,
+  poll_interval: float = 2.0,
+) -> "tuple[str, Optional[str]]":
+  """A2A 0.3.0 の ``message/send`` を送り、非同期タスクは ``tasks/get`` で
+  終端状態までポーリングして ``(最終応答テキスト, contextId)`` を返す。
+
+  ADK の RemoteA2aAgent は ``working`` タスクをポーリングせず「処理中」
+  プレースホルダを返すため、marginalia 等の非同期エージェントの実応答を
+  取りこぼす。本関数はそれを回避するための最小実装。
+
+  - ``context_id`` を渡すと message に ``contextId`` を載せ、マルチターンの
+    会話文脈を維持する。応答から得た ``contextId`` を返すので、呼び出し側は
+    次ターンへ引き継げる。
+  - JSON-RPC エラー（-32600 など）は ``RuntimeError`` として送出し、
+    「審査対象の応答」として採点されないようにする。
+  """
+  import asyncio
+  import uuid as _uuid
+  import httpx
+
+  _message = {
+    "role": "user",
+    "parts": [{"kind": "text", "text": prompt_text}],
+    "messageId": _uuid.uuid4().hex,
+    "kind": "message",
+  }
+  if context_id:
+    _message["contextId"] = context_id
+  send_payload = {
+    "jsonrpc": "2.0",
+    "id": _uuid.uuid4().hex,
+    "method": "message/send",
+    "params": {"message": _message},
+  }
+  req_headers = {"Content-Type": "application/json", "Accept": "application/json"}
+  if headers:
+    req_headers.update(headers)
+
+  # 非同期エージェント（例: marginalia は応答に数十秒かかる）に対応するため、
+  # ポーリングの総予算は per-request の HTTP timeout とは別に確保する。
+  # SECURITY_GATE_TIMEOUT が短くても（例: 10s）、tasks/get で completed を待てるようにする。
+  poll_budget = max(timeout, float(os.getenv("SECURITY_GATE_A2A_POLL_TIMEOUT", "120")))
+  per_request_timeout = min(max(timeout, 15.0), 30.0)
+  loop = asyncio.get_event_loop()
+  deadline = loop.time() + poll_budget
+
+  async with httpx.AsyncClient(timeout=per_request_timeout, headers=req_headers) as client:
+    resp = await client.post(rpc_url, json=send_payload)
+    resp.raise_for_status()
+    data = resp.json()
+    if isinstance(data, dict) and data.get("error"):
+      err = data["error"]
+      raise RuntimeError(
+        f"A2A JSON-RPC error from {rpc_url}: "
+        f"code={err.get('code')} message={err.get('message')}"
+      )
+    result = (data or {}).get("result") or {}
+    ctx = result.get("contextId") or context_id
+
+    # Message 即時応答ならそのまま返す
+    if result.get("kind") == "message":
+      return _a2a_extract_text(result), ctx
+
+    # Task: 終端でなければ tasks/get でポーリング
+    task_id = result.get("id")
+    state = (result.get("status") or {}).get("state")
+    text = _a2a_extract_text(result)
+
+    while task_id and state not in _A2A_STOP_STATES and loop.time() < deadline:
+      await asyncio.sleep(poll_interval)
+      get_payload = {
+        "jsonrpc": "2.0",
+        "id": _uuid.uuid4().hex,
+        "method": "tasks/get",
+        "params": {"id": task_id},
+      }
+      try:
+        g = await client.post(rpc_url, json=get_payload)
+        g.raise_for_status()
+        gdata = g.json()
+      except Exception as exc:  # 一時的なポーリング失敗は継続
+        logger.warning(f"A2A tasks/get ポーリング失敗（継続）: {exc}")
+        continue
+      if isinstance(gdata, dict) and gdata.get("error"):
+        # tasks/get がエラーを返したら打ち切り（直近の text を返す）
+        logger.warning(f"A2A tasks/get エラー: {gdata.get('error')}")
+        break
+      gresult = (gdata or {}).get("result") or {}
+      state = (gresult.get("status") or {}).get("state")
+      ctx = gresult.get("contextId") or ctx
+      new_text = _a2a_extract_text(gresult)
+      if new_text:
+        text = new_text
+
+    if state and state not in _A2A_TERMINAL_STATES:
+      logger.warning(
+        f"A2A タスクが終端に達せず打ち切り (state={state}, task={task_id})"
+      )
+    return text, ctx
+
+
 def invoke_endpoint(
   endpoint_url: str,
   prompt_text: str,
@@ -846,119 +1017,45 @@ def invoke_endpoint(
             temp_card_path = f.name
           print(f"[DEBUG] Saved fixed agent card to: {temp_card_path}")
 
-        # Create RemoteA2aAgent - ADK handles all A2A protocol details
-        # Pass the fixed agent card file path
-        # 認証ヘッダがある場合は、message/send に Bearer を載せるための
-        # httpx クライアントを渡す（認証付きA2A対象のため）。
-        if a2a_auth_headers:
-          a2a_httpx_client = httpx.AsyncClient(timeout=timeout, headers=a2a_auth_headers)
-        remote_agent = RemoteA2aAgent(
-          name=agent_name,
-          agent_card=temp_card_path,  # Pass file path to fixed agent card
-          timeout=timeout,
-          httpx_client=a2a_httpx_client,
-        )
-
-        # Use provided IDs or generate defaults
-        # Reference: orchestration_agent.py lines 158-159
-        # Note: We need nonlocal to access outer function's user_id parameter
-        # session_id passed from caller is for tracking purposes only
-        # We always create a new session for this A2A agent invocation
-        # because each SessionService instance is independent
-        nonlocal user_id
-        if user_id is None:
-          user_id = "security-gate"  # Default constant user_id for security gate
-
-        # Always generate a new session_id for this A2A invocation
-        # The passed session_id is only for logging/tracking purposes
-        a2a_session_id = f"a2a-invoke-{uuid.uuid4().hex[:8]}"
-
-        # Create session service and session
-        # Reference: orchestration_agent.py lines 162-168
-        session_service = InMemorySessionService()
-        await session_service.create_session(
-          app_name="security_gate",
-          user_id=user_id,
-          session_id=a2a_session_id,
-          state={}
-        )
-
-        # Create a Runner for the remote agent
-        # Reference: orchestration_agent.py lines 171-175
-        runner = Runner(
-          agent=remote_agent,
-          app_name="security_gate",
-          session_service=session_service
-        )
-
-        # Create the message content
-        # Reference: orchestration_agent.py lines 178-181
-        new_message = types.Content(
-          parts=[types.Part(text=prompt_text)],
-          role="user"
-        )
-
-        # Run the agent - ADK automatically handles A2A protocol communication
-        # Reference: orchestration_agent.py lines 191-219
-        response_parts = []
-        artifact_records = []  # A2A Artifact交換の記録用
-        print(f"[DEBUG] Starting runner.run_async for {agent_name}")
-        async for event in runner.run_async(
-          user_id=user_id,
-          session_id=a2a_session_id,
-          new_message=new_message
-        ):
-          print(f"[DEBUG] A2A agent {agent_name} event: {type(event).__name__}, hasattr content: {hasattr(event, 'content')}")
-          logger.info(f"A2A agent {agent_name} event: {type(event).__name__}")
-
-          # Extract text and artifacts from different event types
-          # Reference: orchestration_agent.py lines 206-251 (includes function calls/responses)
-          if hasattr(event, 'content') and event.content:
-            print(f"[DEBUG] Event has content, type: {type(event.content)}, is str: {isinstance(event.content, str)}")
-            if isinstance(event.content, str):
-              response_parts.append(event.content)
-              print(f"[DEBUG] Appended string content: {event.content[:100]}")
-            else:
-              # Handle Content object with parts
-              parts_text = []
-              print(f"[DEBUG] Content has {len(event.content.parts) if hasattr(event.content, 'parts') else 0} parts")
-              for part in event.content.parts:
-                if hasattr(part, 'text') and part.text:
-                  response_parts.append(part.text)
-                  parts_text.append(part.text)
-                  print(f"[DEBUG] Appended part text: {part.text[:100]}")
-                else:
-                  # A2A Artifact対応: 非テキストPartのメタデータを記録
-                  artifact_meta = _extract_artifact_metadata(part)
-                  if artifact_meta:
-                    artifact_records.append(artifact_meta)
-                    print(f"[DEBUG] Artifact detected: {artifact_meta}")
-
-            # Extract function calls (tool usage) - CRITICAL FOR AGENTS USING TOOLS
-            # Reference: orchestration_agent.py lines 221-235
+        # x402 課金ゲートの検出（dry-run対応・送金なし）。
+        # カードに x402 支払い要件（payment_schemes / x-payment-info）が宣言されている場合、
+        # 既定（無効/dry-run）では支払わず「課金ゲート: 未払い」を記録して短絡する。
+        # 実送金(live)は利用者が Payer を実装・有効化した場合のみ（本フックでは送金しない）。
+        try:
+          from .x402_payment import (
+            parse_payment_from_card, x402_config_from_env, get_process_meter,
+            handle_payment_required, DisabledPayerError,
+          )
+          _x402_req = parse_payment_from_card(agent_card_data)
+          if _x402_req and _x402_req.amount > 0:
+            _x402_cfg = x402_config_from_env()
+            _x402_meter = get_process_meter(_x402_cfg)
             try:
-              function_calls = event.get_function_calls()
-              if function_calls:
-                print(f"[DEBUG] Tool calls detected: {[fc.name for fc in function_calls]}")
-                logger.info(f"Tool calls detected: {[fc.name for fc in function_calls]}")
-            except Exception as e:
-              logger.debug(f"No function calls in this event: {e}")
+              # payer=None のため、dry-run/無効は記録のみ、live は DisabledPayerError で安全停止。
+              handle_payment_required(_x402_req, _x402_cfg, _x402_meter, payer=None)
+              _msg = (
+                f"[x402 payment-gated] would pay {_x402_req.amount} {_x402_req.asset} "
+                f"on {_x402_req.network} (pay_to={_x402_req.pay_to}); not paid "
+                f"(mode={_x402_cfg.mode}, enabled={_x402_cfg.enabled})"
+              )
+            except DisabledPayerError as _dpe:
+              _msg = f"[x402 payment-gated] live mode but no Payer configured; not paid ({_dpe})"
+            print(f"[DEBUG] x402 dry-run short-circuit: {_msg}")
+            return _msg
+        except Exception as _x402exc:  # x402検出の失敗は無視して通常フロー継続
+          logger.warning(f"x402検出でエラー（無視して通常フロー継続）: {_x402exc}")
 
-            # Extract function responses (tool results) - CRITICAL FOR AGENTS USING TOOLS
-            # Reference: orchestration_agent.py lines 237-251
-            try:
-              function_responses = event.get_function_responses()
-              if function_responses:
-                print(f"[DEBUG] Tool responses detected: {[fr.name for fr in function_responses]}")
-                logger.info(f"Tool responses detected: {[fr.name for fr in function_responses]}")
-            except Exception as e:
-              logger.debug(f"No function responses in this event: {e}")
-          else:
-            print(f"[DEBUG] Event has no content or content is None")
-
-        # Combine all response parts
-        # Reference: orchestration_agent.py line 266
-        response_text = "\n".join(response_parts) if response_parts else ""
+        # 直接 A2A JSON-RPC（message/send → tasks/get ポーリング）で最終応答を取得する。
+        # ADK の RemoteA2aAgent は非同期の working タスクをポーリングせず「処理中」
+        # プレースホルダ（例: marginalia の "I'll get back to you shortly..."）を
+        # そのまま返してしまい、攻撃に対する実応答を取りこぼす。これを回避するため
+        # カードの url（RPCエンドポイント）に対して送信し、終端状態まで自前で待つ。
+        rpc_url = agent_card_data.get("url") or normalized_endpoint_url
+        response_text = await _a2a_send_and_poll(
+          rpc_url, prompt_text, a2a_auth_headers, timeout,
+        )
+        response_parts = [response_text] if response_text else []
+        artifact_records = []  # A2A Artifact交換の記録用（直接クライアントでは未収集）
 
         # テキスト内の [A2A Artifacts] セクションからArtifactを検出
         # ADK Runner が TaskArtifactUpdateEvent を伝播しないため、
@@ -1028,6 +1125,17 @@ def invoke_endpoint(
       try:
         payload = json.loads(data)
         if isinstance(payload, dict):
+          # JSON-RPC エラー（例: -32600 Invalid Request）を「審査対象の応答」として
+          # 採点しないよう明示的に失敗させる。レガシー直POSTで JSON-RPC 専用の
+          # A2A エンドポイント（/api/a2a 等）を叩いた場合に発生する。本来は
+          # is_a2a_endpoint で A2A 経路に振り分けられるべきもの。
+          if "jsonrpc" in payload and isinstance(payload.get("error"), dict):
+            err = payload["error"]
+            raise RuntimeError(
+              f"Endpoint returned a JSON-RPC error (likely an A2A endpoint hit via the "
+              f"legacy POST path): code={err.get('code')} message={err.get('message')}. "
+              f"endpoint={endpoint_url}"
+            )
           # Legacy format response
           for key in ("response", "output", "text"):
             value = payload.get(key)

@@ -941,70 +941,33 @@ async def invoke_multiturn_dialogue(
         "error": error_msg
       }
 
-    # Create RemoteA2aAgent - this will be reused across all turns
-    # 認証ヘッダがある場合は message/send に Bearer を載せる httpx クライアントを渡す
-    if mt_auth_headers:
-      mt_httpx_client = httpx.AsyncClient(timeout=timeout, headers=mt_auth_headers)
-    remote_agent = RemoteA2aAgent(
-      name="multiturn_test_agent",
-      agent_card=temp_card_path,
-      timeout=timeout,
-      httpx_client=mt_httpx_client
-    )
+    # 直接 A2A JSON-RPC（message/send → tasks/get ポーリング）でターンを実行する。
+    # ADK の RemoteA2aAgent は非同期 working タスクをポーリングせず「処理中」
+    # プレースホルダを返し、marginalia 等の非同期エージェントで実応答を取りこぼす
+    # （Security Gate と同じ問題。横展開）。会話文脈は A2A の contextId で維持する。
+    from .security_gate import _a2a_send_and_poll_ctx
+    rpc_url = agent_card_data.get("url") or endpoint_url
+    a2a_context_id: Optional[str] = None  # ターン間で引き継ぐ contextId
 
-    # Create session service and runner ONCE for the entire dialogue
-    session_service = InMemorySessionService()
-    runner = Runner(
-      agent=remote_agent,
-      app_name="multiturn_capability_check",
-      session_service=session_service
-    )
-
-    # Generate a single session_id for the entire dialogue
-    dialogue_session_id = f"multiturn-{uuid.uuid4().hex[:8]}"
-
-    # Create session ONCE
-    session_service.create_session_sync(
-      app_name="multiturn_capability_check",
-      user_id=user_id,
-      session_id=dialogue_session_id,
-      state={}
-    )
-
-    logger.info(f"Starting multi-turn dialogue with session_id={dialogue_session_id}, max_turns={max_turns}")
+    logger.info(f"Starting multi-turn dialogue (direct A2A poll), max_turns={max_turns}")
 
     current_prompt = initial_prompt
 
     for turn in range(1, max_turns + 1):
       logger.info(f"Turn {turn}/{max_turns}: User says: {current_prompt[:100]}...")
 
-      # Create message for this turn
-      new_message = types.Content(
-        parts=[types.Part(text=current_prompt)],
-        role="user"
-      )
-
       agent_response = ""
       turn_artifacts = []  # A2A Artifact交換の記録用
 
-      # Run agent with the SAME session_id - this maintains conversation context
+      # 直接 A2A 送信＋ポーリング。contextId を引き継いで会話文脈を維持する。
       try:
-        async for event in runner.run_async(
-          user_id=user_id,
-          session_id=dialogue_session_id,  # Same session across all turns!
-          new_message=new_message
-        ):
-          if hasattr(event, 'content') and event.content and hasattr(event.content, 'parts'):
-            for part in event.content.parts:
-              if hasattr(part, 'text') and part.text:
-                agent_response += part.text
-              else:
-                # A2A Artifact対応: 非テキストPartのメタデータを記録
-                from .security_gate import _extract_artifact_metadata
-                artifact_meta = _extract_artifact_metadata(part)
-                if artifact_meta:
-                  turn_artifacts.append(artifact_meta)
-                  logger.info(f"Turn {turn}: Artifact detected: {artifact_meta}")
+        agent_response, a2a_context_id = await _a2a_send_and_poll_ctx(
+          rpc_url,
+          current_prompt,
+          mt_auth_headers,
+          timeout,
+          context_id=a2a_context_id,
+        )
       except Exception as e:
         logger.error(f"Turn {turn} failed: {e}")
         agent_response = f"[Error: {str(e)}]"
