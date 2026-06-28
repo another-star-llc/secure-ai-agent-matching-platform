@@ -94,11 +94,25 @@ SYNTHORA Mesh(x402定型) / aicomglobal(構造化案内) / MoveHome.org・ARCASO
 
 | 候補 | 提供 | 認証 | 鍵取得（セルフ登録） | 自由対話 | 評価 |
 |---|---|---|---|---|---|
-| **自前A2A（APIキー/Bearer付き）** ★ | 自社 | `X-Api-Key`/`Bearer`（自己発行） | 可（全制御） | ◯（LLM構成次第） | **最も確実**。認証ヘッダ注入経路＋脱獄テストを自管理下で再現 |
-| **LangSmith（LangChain）** | LangChain | **`X-Api-Key`** | 可（無料Developerプランで発行） | ◯（messages入力・contextId会話継続） | 自分でデプロイしたアシスタントを自己鍵で叩く。要確認: 無料枠で実行課金が収まるか |
-| Retool Agents | Retool | `X-Api-Key`(`retool_wk_`) | 可（Free枠／A2A発行手順は要確認） | △（構造化寄り） | 形式テスト向き |
+| **Human Browser（Virix Labs）** ★実在第三者 | 第三者 | **`http_bearer`**（毎回必須・ライブ確認） | **可**（メールのみ・$1トライアル・カード不要／`POST /api/buy`） | **◯ 実LLM**（browser_task 等の自然言語タスク＝注入surfaceあり） | 唯一見つかった**第三者・公開・A2A・自由対話・セルフ発行鍵**。下記参照 |
+| **自前A2A（APIキー/Bearer付き）** | 自社 | `X-Api-Key`/`Bearer`（自己発行） | 可（全制御） | ◯（LLM構成次第） | 認証注入“機械”の検証用フィクスチャ（実在審査にはならない） |
+| **LangSmith（LangChain）** | LangChain | `X-Api-Key` | 可（無料Developer） | ◯ | 自分でデプロイ＝機械検証用 |
+| Retool Agents | Retool | `X-Api-Key`(`retool_wk_`) | 可（Free枠／要確認） | △構造化 | 形式テスト |
 
-→ **このカテゴリは「自前A2A or LangSmith でセルフ発行鍵＋公開A2Aエンドポイント」を作るのが正解**。第三者運営のブラックボックス対話型を“鍵を買って”叩く対象は実在が乏しい（事実）。
+### ★実在第三者: Human Browser（Virix Labs） — 2026-06-28 ライブ確認
+**「第三者・公開・A2A・自由対話・セルフ発行Bearer鍵」を全部満たす唯一の実在候補**（138件ライブ走査の結論）。
+- EP `https://agent.humanbrowser.cloud/a2a` / Card `/.well-known/agent-card.json`（protocolVersion 0.3.0・無認証GET可）
+- `securitySchemes: {http_bearer}`（"Skill token issued by humanbrowser.cloud. Required on every /a2a call." ＝カードと実挙動一致）
+- **無認証 `message/send` は 401**（調査でデタラメBearerでも401＝本物の認証ゲート）。skills: `browser_task`/`login_and_scrape`/`fill_form` 等＝**LLM駆動ブラウザ**（自然言語タスク＝注入/脱獄を試せる）。
+- **セルフ発行**: メールのみのサインアップ（カード不要）。$1テストトークン（14日失効）。以降従量（browser $0.05/分・LLM $0.02〜/task 等）。
+- **⚠️実装上の注意**: 前段に **Cloudflare**（無認証/bot は 403 error 1010）。審査ランナーの httpx に**ブラウザ風 User-Agent**を付けないと 403 で弾かれる（鍵の前にWAFで落ちる）→ 要対応。
+- **次手**: humanbrowser.cloud でサインアップ→$1トークン取得（※利用者のアカウント＝こちらでは取得できない）→ `SECURITY_ENDPOINT_TOKEN=<token>` で審査（パイプラインが `Authorization: Bearer` を注入）。
+
+**次点（認証・セルフ発行は◎だが自由対話でない）**: Numbers Online（`https://numbers.online/api/v1/a2a`、Bearer/`X-API-Key`、`POST /api/v1/account/signup` でメール不要・無料枠、ただし**電話番号ルックアップの構造化型**＝注入surfaceなし）。
+**構造化で401を返した群（参考・自由対話でない/自己発行未確認）**: RagSphere(`x-a2a-key`) / Clix Agent(`X-API-Key`) / ACC AirSpace / SwarmSync 等。
+**除外**: Agoragentic（無認証で200＝discover開放・x402課金型・構造化）。
+
+→ **結論の更新**: 前回「第三者の対話型は実在乏しい」としたが、**Human Browser が条件を満たす実在第三者として見つかった**（ただしCloudflare対応とサインアップが要る）。自前/LangSmith は「認証注入“機械”の検証用フィクスチャ」に格下げ。
 
 ## カテゴリ③ x402従量課金
 

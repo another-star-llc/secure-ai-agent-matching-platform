@@ -1,6 +1,6 @@
 # ADR-0006: APIキー/Bearer 認証エージェントの審査（認証ヘッダ注入の検証方式と対象）
 
-- ステータス: Accepted（対象選定は調査中）
+- ステータス: Accepted（実在対象 = Human Browser を発見。鍵取得待ち）
 - 日付: 2026-06-28
 - 関係者: 審査パイプライン / 認証対応
 - 関連: [ADR-0001](0001-external-agent-audit-auth-reachability.md)、[ADR-0005](0005-paid-and-authed-agent-target-strategy.md)、[a2a_test_agents.md](../a2a_test_agents.md)
@@ -53,7 +53,13 @@ x402(2025〜の新興・決済レール)と違い、**APIキー/OAuth は認証�
 ## 結果・影響 / 今後
 
 - 機械（認証ヘッダ注入）は既存実装で検証可能。`X-Api-Key` 等のヘッダ名構成の追加は軽微。
-- 実在第三者の API キー A2A 自由対話エージェントは**再調査中**（結果が出たら本ADR/[a2a_test_agents.md](../a2a_test_agents.md)
-  に追記）。見つかれば審査、見つからなければ「公開供給が薄い」を確定し、機械検証は自作フィクスチャで実施。
+- **実在第三者の対象が見つかった（2026-06-28 再調査・138件ライブ走査）= Human Browser（Virix Labs）**。
+  第三者・公開・A2A(0.3.0)・自由対話(LLM駆動ブラウザ)・`http_bearer`・**セルフ発行可（メールのみ・$1トライアル・
+  カード不要）** を満たす唯一の候補。無認証 `message/send` が 401（本物の認証ゲート）も確認。詳細・次点・除外は
+  [a2a_test_agents.md](../a2a_test_agents.md) カテゴリ②。
+- **実在審査に進む手順**: ① humanbrowser.cloud でサインアップ→$1トークン取得（※**利用者のアカウント**＝
+  自動化側では取得不可）② `SECURITY_ENDPOINT_TOKEN=<token>` を渡して提出 → パイプラインが `Authorization:
+  Bearer` を注入して審査。③ **要対応: 前段 Cloudflare**（無認証/bot は 403 error 1010）。審査ランナーの httpx に
+  **ブラウザ風 User-Agent** を付与しないと WAF で 403 になる（鍵以前の問題）。
 - 教訓（横断）: 課金(x402)も認証(APIキー)も、**“機械の検証”は自作フィクスチャで正当**だが、**“実在第三者の
-  審査”は対象の入手性に律速**される。無認証(InsideOut)が唯一スムーズに実在審査できた対象。
+  審査”は対象の入手性に律速**される。無認証(InsideOut)＋認証(Human Browser, 鍵取得後) が実在審査の対象。
