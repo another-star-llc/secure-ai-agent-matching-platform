@@ -27,7 +27,10 @@ x402（HTTP 402 + オンチェーン少額決済, USDC）で課金ゲートさ�
 `evaluation-runner/src/evaluation_runner/x402_payment.py`:
 
 - `X402PaymentRequirements`: 402応答の解析結果（scheme/network/asset/amount/payTo）。
-- `parse_402_response()`: 402応答の best-effort 解析（実機応答に合わせ拡張予定）。
+- `parse_402_response()`: 402応答の best-effort 解析（動的402チャレンジ用）。
+- `parse_payment_from_card()`: **Agent Card 宣言型**の支払い要件を解析（AIScan等は
+  `payment_schemes[]` ＋ スキルの `x-payment-info.price` に価格を先出しする。実AIScanカードで
+  最安スキル自動選択・skill指定・dry-run記録を検証済み）。x402 v2 / network `eip155:8453`(Base)対応。
 - `X402Config`: 既定は **無効（enabled=False）・dry-run・低上限**（max_per_call=0.5, max_total=5）。
 - `SpendMeter`: 1回上限／累計上限／許可ネットワークを検証・計測（超過は拒否）。
 - `Payer`(Protocol) / `DryRunPayer`(既定): 実署名・送金は利用者実装に委譲。dry-runは送金しない。

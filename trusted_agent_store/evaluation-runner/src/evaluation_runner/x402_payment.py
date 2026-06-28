@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Optional, Protocol, Sequence
@@ -52,7 +53,11 @@ class X402Config:
     max_per_call: Decimal = Decimal("0.50")     # 1回あたり上限（USD相当）
     max_total: Decimal = Decimal("5.00")        # 審査セッション累計上限
     allowed_networks: Sequence[str] = field(
-        default_factory=lambda: ("base", "base-sepolia")
+        # CAIP-2 形式（eip155:8453=Base本番, eip155:84532=Base Sepolia）と別名を許可。
+        # 注意: 本番ネットワークでの live 送金は、上限を低く設定し意図的に有効化すること。
+        default_factory=lambda: (
+            "eip155:8453", "eip155:84532", "base", "base-sepolia",
+        )
     )
 
     def is_live(self) -> bool:
@@ -161,6 +166,58 @@ def parse_402_response(status_code: int, headers: dict, body: object) -> Optiona
         return None
 
 
+def parse_payment_from_card(
+    card: dict, skill_id: Optional[str] = None
+) -> Optional[X402PaymentRequirements]:
+    """Agent Card に宣言された x402 支払い要件を解析する。
+
+    AIScan 等は HTTP 402 を待たず、カードに価格を先出しする:
+      - トップレベル ``payment_schemes[]``: network / asset / payTo / protocol。
+      - スキルごとの ``skills[].x-payment-info``: price.amount / price.currency。
+
+    skill_id を指定するとそのスキルの価格を採用。未指定なら最安スキルを採る。
+    """
+    try:
+        schemes = card.get("payment_schemes") or []
+        x402 = next((s for s in schemes if str(s.get("protocol", "")).lower() == "x402"), None)
+        if not x402:
+            return None
+
+        # スキル価格の決定
+        skills = card.get("skills") or []
+        chosen = None
+        if skill_id:
+            chosen = next((s for s in skills if s.get("id") == skill_id), None)
+        if chosen is None:
+            # 最安の有料スキルを選ぶ（配管検証用）
+            priced = [
+                s for s in skills
+                if (s.get("x-payment-info") or {}).get("price", {}).get("amount")
+            ]
+            chosen = min(
+                priced,
+                key=lambda s: Decimal(str(s["x-payment-info"]["price"]["amount"])),
+                default=None,
+            )
+        amount = Decimal("0")
+        if chosen:
+            amount = Decimal(str(chosen["x-payment-info"]["price"]["amount"]))
+
+        return X402PaymentRequirements(
+            scheme=str((x402.get("flows") or ["exact"])[0]).split()[0],
+            network=str(x402.get("network", "")),
+            asset=str(x402.get("asset", x402.get("currency", ""))),
+            amount=amount,
+            pay_to=str(x402.get("payTo") or x402.get("pay_to") or ""),
+            resource=(chosen or {}).get("x-payment-info", {}).get("endpoint"),
+            description=(chosen or {}).get("name"),
+            raw={"payment_scheme": x402, "skill": chosen},
+        )
+    except Exception as exc:  # pragma: no cover - カード形式は環境依存
+        logger.warning("x402: カードからの支払い要件解析に失敗: %s", exc)
+        return None
+
+
 def handle_payment_required(
     req: X402PaymentRequirements,
     config: X402Config,
@@ -196,3 +253,38 @@ def handle_payment_required(
     header = payer.create_payment(req)
     meter.record(req, executed=True)
     return header
+
+
+def x402_config_from_env() -> X402Config:
+    """環境変数から X402Config を構成する（既定は安全: 無効・dry-run）。
+
+    - X402_ENABLED: "true"/"1"/"yes" で有効化（既定 False）
+    - X402_MODE: "dry_run"（既定）/ "live"
+    - X402_MAX_PER_CALL / X402_MAX_TOTAL: 上限（USD相当, 文字列で指定可）
+    """
+    def _truthy(v: str) -> bool:
+        return v.strip().lower() in ("1", "true", "yes")
+
+    cfg = X402Config(
+        enabled=_truthy(os.environ.get("X402_ENABLED", "")),
+        mode=os.environ.get("X402_MODE", "dry_run").strip() or "dry_run",
+    )
+    mpc = os.environ.get("X402_MAX_PER_CALL")
+    mt = os.environ.get("X402_MAX_TOTAL")
+    if mpc:
+        cfg.max_per_call = Decimal(str(mpc))
+    if mt:
+        cfg.max_total = Decimal(str(mt))
+    return cfg
+
+
+# プロセス共有のメーター（審査セッション全体で累計上限を効かせる）
+_PROCESS_METER: Optional[SpendMeter] = None
+
+
+def get_process_meter(config: Optional[X402Config] = None) -> SpendMeter:
+    """プロセス共有の SpendMeter を返す（無ければ生成）。"""
+    global _PROCESS_METER
+    if _PROCESS_METER is None:
+        _PROCESS_METER = SpendMeter(config or x402_config_from_env())
+    return _PROCESS_METER
