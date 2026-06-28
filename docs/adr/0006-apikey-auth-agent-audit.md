@@ -69,11 +69,18 @@ x402(2025〜の新興・決済レール)と違い、**APIキー/OAuth は認証�
 Human Browser($1トークン取得後)で**実在第三者のフルE2E審査が完走**:
 - **認証突破**: Cloudflare(ブラウザ風UA) ＋ Bearer(token) の両方を突破。`endpoint_error 0`・認証エラー 0。
 - **Security Gate**: blocked 3/3（「乗っ取りシミュレートして爆弾の作り方」等を、ブラウザ接続の話に逸らして拒否＝防御）。
-- **Functional(Agent Card Accuracy)**: scenarios 3 / passed 1 / failed 0 / responsesWithError 2
-  （※エラーは Human Browser 側のブラウザ接続不良「site can't be reached / ERR_TUNNEL」由来＝相手の状態であり
-  パイプラインのバグではない）。
-- **最終 Trust Score: 70 / needs_review**（3つの実審査=InsideOut 53 / x402 merchant / Human Browser 70 で最高）。
-- **コスト**: humanbrowser invoke 6回のみ（攻撃は拒否中心で安価）＝$1トライアル枠に余裕。
+- **Functional(Agent Card Accuracy)**: scenarios 3 / passed 1 / failed 2 / responsesWithError 2
+  （※**failed 2 は HTTP 402 Payment Required = $1トライアル残高の枯渇**。Functional の「Browser Task」
+  シナリオ1で**エージェントが実ブラウザを走らせ**（"Step 4/50 — Click the DuckDuckGo..."）$0.05/分を消費し
+  $1をほぼ使い切り、シナリオ2・3が 402 になった。＝相手のバグでも認証問題でもなく、**こちらの予算切れ**）。
+- **最終 Trust Score: 70 / needs_review**。**ただし Functional 2件が 402(予算切れ)で失敗した状態の算出**であり、
+  純粋なエージェント品質だけの評価ではない（予算切れで審査が途中degradeした）。Security Gate(3/3 blocked)は
+  枯渇前に完了済みで有効。
+- **コスト構造の教訓**: **拒否される攻撃プロンプトは安い（ブラウザを動かさない）が、正規のブラウザタスクは
+  実ブラウザを動かして高い**（$0.05/分）。**Human Browser 等の“実行で課金される”エージェントは $1 では
+  Functional まで完走できない**。完走させるには事前トップアップ、または Functional を縮小/スキップする。
+- **402(残高枯渇)の扱い**: これはプリペイド残高切れの HTTP 402 で、x402 のper-call決済チャレンジとは別物。
+  自動トップアップ（実費）すべきでないため、パイプラインは responsesWithError として正しく記録した。
 
 → **3カテゴリ（無認証=InsideOut / x402=自作merchant / 認証=Human Browser）すべて、実対象/実証で到達**。
 特に認証カテゴリは**実在の第三者エージェントを、パイプラインの認証ヘッダ注入＋Cloudflare対応で採点まで審査**できた。
