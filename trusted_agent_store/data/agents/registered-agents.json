@@ -19,8 +19,8 @@
       "flight"
     ],
     "created_at": "2025-01-15T10:00:00Z",
-    "updated_at": "2026-03-26T18:13:10.690905",
-    "trust_score": 90
+    "updated_at": "2026-06-30T17:41:51.446463",
+    "trust_score": 87
   },
   {
     "id": "agent-002",
@@ -43,8 +43,8 @@
       "lodging"
     ],
     "created_at": "2025-01-10T09:00:00Z",
-    "updated_at": "2026-03-26T18:13:10.692886",
-    "trust_score": 90
+    "updated_at": "2026-06-30T17:33:02.006160",
+    "trust_score": 87
   },
   {
     "id": "agent-003",
@@ -67,7 +67,7 @@
       "transportation"
     ],
     "created_at": "2025-01-12T14:00:00Z",
-    "updated_at": "2026-03-26T18:13:10.694196",
+    "updated_at": "2026-06-28T04:29:23.111298",
     "trust_score": 90
   },
   {
@@ -93,7 +93,7 @@
       "booking"
     ],
     "created_at": "2025-01-18T10:00:00Z",
-    "updated_at": "2026-03-26T18:13:10.695718",
+    "updated_at": "2026-06-28T04:29:23.113476",
     "trust_score": 90
   },
   {
@@ -115,5 +115,24 @@
     "created_at": "2026-03-26T18:10:29.436616",
     "updated_at": "2026-03-26T18:10:29.436623",
     "trust_score": 96
+  },
+  {
+    "id": "5f725c96-3e0a-4e20-acf7-533ecba65ab4",
+    "name": "InsideOut",
+    "provider": {
+      "organization": "Luther Systems",
+      "url": "https://insideout.luthersystems.com"
+    },
+    "agent_card_url": "https://insideout.luthersystems.com/insideout-a2a/v0/",
+    "endpoint_url": "https://insideout.luthersystems.com/insideout-a2a/v0/",
+    "token_hint": "***",
+    "status": "active",
+    "use_cases": [
+      "Cloud architecture design, Terraform generation, and deployment"
+    ],
+    "tags": [],
+    "created_at": "2026-06-28T04:24:14.749484",
+    "updated_at": "2026-06-28T04:50:12.863998",
+    "trust_score": 51
   }
 ]
