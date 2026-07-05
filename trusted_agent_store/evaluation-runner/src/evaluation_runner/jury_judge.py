@@ -29,6 +29,23 @@ except ImportError:
         def init(project_name):
             pass
 
+def _weave_already_initialized() -> bool:
+    """weave が既に初期化済み（アクティブなクライアントが存在する）かを返す。
+
+    ``run_judge_panel`` は ``@weave.op`` でトレースされるため、パイプライン経由で
+    呼ばれる時点で weave は初期化済み。その状態で ``weave.init()`` を再度呼ぶと、
+    既存クライアントの ``finish()`` → 保留トレースの同期フラッシュが、実行中の op と
+    相互待ちになりデッドロックする。これを避けるため再init前に本関数で判定する。
+    """
+    if not HAS_WEAVE:
+        return False
+    try:
+        from weave.trace.context import weave_client_context
+        return weave_client_context.get_weave_client() is not None
+    except Exception:
+        return False
+
+
 # Try to import jury-judge-worker components
 try:
     from jury_judge_worker.question_generator import QuestionSpec
@@ -78,8 +95,12 @@ def run_judge_panel(
     Returns:
         Judge panel summary with AISI scores and verdict
     """
-    # Initialize W&B Weave (if available)
-    if HAS_WEAVE:
+    # Initialize W&B Weave (if available).
+    # 重要: この関数は @weave.op でトレースされるため、パイプライン経由の呼び出しでは
+    # weave は既に初期化済み。その状態で weave.init() を再度呼ぶと finish()→保留トレースの
+    # 同期フラッシュが実行中の op と相互待ちになりデッドロックする（judge_panel_running で
+    # 無限ハングする不具合の原因）。よって「未初期化のときだけ」初期化する。
+    if HAS_WEAVE and not _weave_already_initialized():
         wandb_entity = os.environ.get("WANDB_ENTITY", "local")
         wandb_project = os.environ.get("WANDB_PROJECT", "agent-evaluation")
         try:
