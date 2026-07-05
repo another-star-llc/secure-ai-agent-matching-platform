@@ -151,15 +151,38 @@ async def invoke_a2a_agent(
 
         candidates = card_url_candidates(agent_url)
         card_url = candidates[0] if candidates else f"{agent_url.rstrip('/')}/.well-known/agent-card.json"
-        async with httpx.AsyncClient(timeout=10.0) as probe_client:
+        # HTTP 200 だけでは不十分。InsideOut 等は誤ったパスでも 200 で JSONRPC エラー
+        # （{"error": ...}）を返すため、`raise_for_status()` を通過してしまう。それを
+        # カードとして採用すると RemoteA2aAgent が構造検証で落ちて「応答ゼロ」になる。
+        # そこで本文が実際にカード構造（name と capabilities/skills を持つ）かを検証する。
+        card_found = False
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as probe_client:
             for candidate in candidates:
                 try:
-                    probe_resp = await probe_client.get(candidate)
+                    probe_resp = await probe_client.get(
+                        candidate, headers={"User-Agent": "Mozilla/5.0"}
+                    )
                     probe_resp.raise_for_status()
+                    card = probe_resp.json()
+                    if not (
+                        isinstance(card, dict)
+                        and card.get("name")
+                        and ("capabilities" in card or "skills" in card)
+                    ):
+                        logger.warning(
+                            f"Endpoint returned 200 but not a valid agent card: {candidate}"
+                        )
+                        continue
                     card_url = candidate
+                    card_found = True
                     break
                 except Exception as probe_err:
                     logger.warning(f"Agent card not found at {candidate}: {probe_err}")
+        if not card_found:
+            logger.error(
+                f"No valid agent card resolved for {agent_name} from {agent_url}; "
+                f"tried: {candidates}"
+            )
 
         # Create RemoteA2aAgent - ADK handles all A2A protocol details
         remote_agent = RemoteA2aAgent(

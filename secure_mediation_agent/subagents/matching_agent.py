@@ -64,6 +64,24 @@ async def fetch_agent_card(agent_url: str) -> dict[str, Any]:
         }
 
 
+def _provider_to_str(provider: Any) -> str:
+    """provider フィールドを文字列に正規化する。
+
+    モックエージェントは provider が文字列だが、A2A 仕様準拠の実エージェントは
+    {"organization": ..., "url": ...} のオブジェクト。オブジェクトの場合は
+    organization 名（無ければ url）を採用する。
+
+    Args:
+        provider: 文字列または {"organization": ..., "url": ...} 形式の dict。
+
+    Returns:
+        プロバイダ名の文字列。
+    """
+    if isinstance(provider, dict):
+        return str(provider.get("organization") or provider.get("url") or "")
+    return str(provider or "")
+
+
 def _convert_agent_entry_to_matcher_format(agent: dict[str, Any]) -> dict[str, Any]:
     """Convert Agent Store API response to matcher format.
 
@@ -111,7 +129,10 @@ def _convert_agent_entry_to_matcher_format(agent: dict[str, Any]) -> dict[str, A
         "trust_score": trust_score,
         "defaultInputModes": ["text"],
         "defaultOutputModes": ["text"],
-        "provider": agent.get("provider", ""),
+        # provider は文字列の場合（モックエージェント）と A2A 仕様準拠の
+        # オブジェクト {"organization": ..., "url": ...}（実エージェント）の両方があり得る。
+        # 下流で .lower() などを呼ぶため、ここで文字列に正規化する。
+        "provider": _provider_to_str(agent.get("provider", "")),
         "status": agent.get("status", "unknown"),
         "agent_id": agent.get("id", ""),
     }
