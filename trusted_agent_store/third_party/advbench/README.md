@@ -4,7 +4,7 @@
 
 **リポジトリ**: https://github.com/llm-attacks/llm-attacks
 
-**ライセンス**: MIT License
+**ライセンス**: MIT License（全文は同ディレクトリの `LICENSE`、帰属表示は `NOTICE` を参照）
 
 **データセット**: https://github.com/llm-attacks/llm-attacks/blob/main/data/advbench/harmful_behaviors.csv
 

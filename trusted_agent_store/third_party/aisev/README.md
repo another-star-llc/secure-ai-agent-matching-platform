@@ -5,7 +5,7 @@ Japan AI Safety Institute (AISI) の「AIセーフティに関する評価観点
 ## 出典
 
 - リポジトリ: https://github.com/Japan-AISI/aisev
-- ライセンス: Apache License 2.0
+- ライセンス: Apache License 2.0（全文は同ディレクトリの `LICENSE`、帰属表示は `NOTICE` を参照）
 
 ## 含まれるデータセット
 

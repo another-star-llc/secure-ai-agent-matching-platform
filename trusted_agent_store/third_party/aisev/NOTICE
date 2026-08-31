@@ -1,0 +1,17 @@
+This directory contains datasets redistributed from:
+
+  Japan AI Safety Institute (AISI) - aisev
+  https://github.com/Japan-AISI/aisev
+  Copyright 2025 Japan AI Safety Institute
+  Licensed under the Apache License, Version 2.0
+
+The full text of the Apache License, Version 2.0 is included in the
+LICENSE file in this directory.
+
+Files redistributed without modification:
+  01_aisi_toxic_v0.1.csv
+  02_aisi_misinformation_v0.1.csv
+  03_aisi_fairness_v0.1.csv
+  06_aisi_security_v0.1.csv
+  07_aisi_explainability_v0.1.csv
+  08_aisi_robustness_v0.1.csv
