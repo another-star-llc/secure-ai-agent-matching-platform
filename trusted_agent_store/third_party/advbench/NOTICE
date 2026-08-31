@@ -1,0 +1,16 @@
+This directory contains a dataset redistributed from:
+
+  llm-attacks / AdvBench
+  https://github.com/llm-attacks/llm-attacks
+  Copyright (c) 2023 Andy Zou
+  Licensed under the MIT License
+
+  Zou, A., Wang, Z., Carlini, N., Nasr, M., Kolter, J. Z., & Fredrikson, M. (2023).
+  Universal and Transferable Adversarial Attacks on Aligned Language Models.
+  arXiv:2307.15043
+
+The full text of the MIT License is included in the LICENSE file in this
+directory.
+
+Files redistributed without modification:
+  advbench_harmful_behaviors.csv
